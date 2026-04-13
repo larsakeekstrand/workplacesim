@@ -32,16 +32,16 @@ this repo as a one-plugin marketplace:
 /plugin install workplacesim
 ```
 
-That's it — the plugin registers `PreToolUse` (matcher `Agent`),
-`SubagentStart`, and `SubagentStop` hooks automatically; no need to edit
-`~/.claude/settings.json`. From any Claude Code session you can also run
+Restart Claude Code after installing so the hooks wire up for the session.
+The plugin registers a `PreToolUse` hook (matcher `Agent`) and a
+`SubagentStop` hook. From any Claude Code session you can run
 `/workplacesim` for a quick status check on the visualizer server.
 
 To point the plugin at a visualizer running on another host, set
-`WORKPLACESIM_URL=http://<host>:4317` in the environment Claude Code runs in
-(e.g. your shell profile).
+`WORKPLACESIM_URL=http://<host>:4317` in the environment Claude Code runs
+in (e.g. your shell profile).
 
-See `plugin/README.md` for details on what the plugin registers.
+See `plugin/README.md` for the plugin-specific details.
 
 ## Hook simulator (no real Claude needed)
 
@@ -50,9 +50,9 @@ npm run simulate
 # flags: --rate=1500 --max-concurrent=8 --min-duration=4000 --max-duration=18000 --total=20 --plan-ratio=0.25 --url=http://...
 ```
 
-Generates fake pretool + start + stop traffic with random users, hosts, agent
-types, and descriptions so you can watch the room fill up. `--plan-ratio` (0..1)
-sets the chance each fake agent runs in plan mode. Ctrl+C to stop.
+Generates fake start + stop traffic with random users, hosts, agent types,
+and descriptions so you can watch the rooms fill up. `--plan-ratio` (0..1)
+sets the fraction of fake agents that run in plan mode. Ctrl+C to stop.
 
 ## Routing rules
 
@@ -66,19 +66,15 @@ Each agent is sorted into one of three rooms when it starts. Priority:
    table with the whiteboard.
 3. **Open plan** — everyone else; assigned the first free desk.
 
-The classification is captured once at `SubagentStart`. Mid-run changes
-to mode or description are not currently reflected.
+The classification is captured once at agent start. Mid-run changes to mode
+or description are not reflected.
 
-## Smoke test (single agent)
+## Smoke test (single agent, no plugin)
 
 ```sh
-curl -XPOST http://localhost:4317/hooks/pretool -H content-type:application/json -d '{
-  "tool_name":"Agent","session_id":"s1","tool_use_id":"tu_1",
-  "tool_input":{"subagent_type":"Explore","description":"Find API endpoints"}
-}'
 curl -XPOST http://localhost:4317/hooks/subagent-start -H content-type:application/json -d '{
   "agent_id":"a1","session_id":"s1","agent_type":"Explore","cwd":"/tmp",
-  "user":"alice","host":"laptop"
+  "user":"alice","host":"laptop","description":"Find API endpoints"
 }'
 sleep 4
 curl -XPOST http://localhost:4317/hooks/subagent-stop -H content-type:application/json -d '{
@@ -91,8 +87,9 @@ Watch a sim walk in, sit, then walk out.
 ## Notes / limitations
 
 - State is in-memory; restarting the server clears active sims.
-- `description` comes from the `PreToolUse` payload for the `Agent` tool and is
-  correlated to `SubagentStart` by `(session_id, agent_type)`. If multiple
-  subagents of the same type start in rapid succession within one session, the
-  descriptions may swap.
-- 12 desks; additional concurrent agents queue against the right wall.
+- Real Claude Code hooks give different IDs at dispatch vs stop. The
+  backend falls back to FIFO matching by `(session_id, agent_type)` on
+  `SubagentStop` when the `agent_id` doesn't match. For parallel subagents
+  of the same type inside a single session, this is best-effort.
+- 12 desks in the open-plan room + 4 meeting seats + 3 lab stations;
+  additional concurrent agents queue against the wall.
