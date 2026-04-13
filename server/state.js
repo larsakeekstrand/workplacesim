@@ -58,6 +58,7 @@ export function startAgent(raw) {
     cwd,
     user,
     host,
+    permission_mode,
   } = raw;
   if (!agent_id) return null;
   if (activeAgents.has(agent_id)) return activeAgents.get(agent_id);
@@ -71,6 +72,7 @@ export function startAgent(raw) {
     user: user || "unknown",
     host: host || "",
     cwd: cwd ?? "",
+    permission_mode: permission_mode || "default",
     started_at: Date.now(),
   };
   activeAgents.set(agent_id, record);
@@ -79,14 +81,28 @@ export function startAgent(raw) {
 }
 
 export function stopAgent(raw) {
-  const { agent_id, last_assistant_message } = raw;
-  if (!agent_id) return null;
-  const record = activeAgents.get(agent_id);
+  const { agent_id, session_id, agent_type, last_assistant_message } = raw;
+
+  let record = agent_id ? activeAgents.get(agent_id) : null;
+  if (!record && session_id && agent_type) {
+    // Real Claude Code payloads: PreToolUse(Agent) gives us tool_use_id, but
+    // SubagentStop gives a different agent_id. Fall back to FIFO match on
+    // (session_id, agent_type) — oldest unfinished sim with that shape wins.
+    for (const r of activeAgents.values()) {
+      if (r.finished_at) continue;
+      if (r.session_id === session_id && r.agent_type === agent_type) {
+        record = r;
+        break;
+      }
+    }
+  }
+
   if (!record) return null;
   record.finished_at = Date.now();
   record.last_message = last_assistant_message ?? null;
-  broadcast({ type: "stop", agent_id });
-  setTimeout(() => activeAgents.delete(agent_id), STOP_GRACE_MS);
+  broadcast({ type: "stop", agent_id: record.agent_id });
+  const targetId = record.agent_id;
+  setTimeout(() => activeAgents.delete(targetId), STOP_GRACE_MS);
   return record;
 }
 

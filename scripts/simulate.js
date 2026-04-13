@@ -15,6 +15,7 @@ const MIN_DURATION_MS = Number(args["min-duration"] ?? 4000);
 const MAX_DURATION_MS = Number(args["max-duration"] ?? 18000);
 const MAX_CONCURRENT = Number(args["max-concurrent"] ?? 8);
 const TOTAL = args.total ? Number(args.total) : Infinity;
+const PLAN_RATIO = Number(args["plan-ratio"] ?? 0.25);
 
 const USERS = ["alice", "bob", "carol", "dave", "erin", "frank"];
 const HOSTS = ["laptop", "devbox", "m3-max", "studio"];
@@ -30,6 +31,8 @@ const DESCRIPTIONS = [
   "Find all API endpoints",
   "Refactor auth middleware",
   "Investigate failing tests",
+  "Run the integration test suite",
+  "Bisect flaky test",
   "Add dark mode toggle",
   "Map build pipeline",
   "Locate telemetry config",
@@ -37,6 +40,7 @@ const DESCRIPTIONS = [
   "Review recent changes",
   "Trace request path",
   "Audit dependency tree",
+  "Write tests for cache layer",
   "Summarize recent PRs",
 ];
 
@@ -69,8 +73,11 @@ async function runAgent() {
   const user = pick(USERS);
   const host = pick(HOSTS);
   const duration = rand(MIN_DURATION_MS, MAX_DURATION_MS);
+  const planMode = Math.random() < PLAN_RATIO;
+  const mode = planMode ? "plan" : "default";
+  const tag = planMode ? "▶ [PLAN]" : "▶";
 
-  console.log(`▶ ${user}@${host} ${agentType} — ${description} (${Math.round(duration)}ms)`);
+  console.log(`${tag} ${user}@${host} ${agentType} — ${description} (${Math.round(duration)}ms)`);
 
   await post("/hooks/pretool", {
     tool_name: "Agent",
@@ -79,6 +86,7 @@ async function runAgent() {
     tool_input: { subagent_type: agentType, description },
     user,
     host,
+    permission_mode: mode,
   });
   await post("/hooks/subagent-start", {
     agent_id: agentId,
@@ -87,6 +95,7 @@ async function runAgent() {
     cwd: `/Users/${user}/src/demo`,
     user,
     host,
+    permission_mode: mode,
   });
 
   await new Promise((r) => setTimeout(r, duration));
@@ -114,7 +123,7 @@ async function tick() {
 }
 
 console.log(
-  `simulator → ${URL} · rate=${RATE_MS}ms · maxConcurrent=${MAX_CONCURRENT} · duration=${MIN_DURATION_MS}-${MAX_DURATION_MS}ms${TOTAL === Infinity ? "" : ` · total=${TOTAL}`}`
+  `simulator → ${URL} · rate=${RATE_MS}ms · maxConcurrent=${MAX_CONCURRENT} · duration=${MIN_DURATION_MS}-${MAX_DURATION_MS}ms · planRatio=${PLAN_RATIO}${TOTAL === Infinity ? "" : ` · total=${TOTAL}`}`
 );
 setInterval(tick, RATE_MS);
 tick();

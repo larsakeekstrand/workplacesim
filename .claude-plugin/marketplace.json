@@ -1,0 +1,11 @@
+{
+  "name": "workplacesim",
+  "owner": { "name": "workplacesim" },
+  "plugins": [
+    {
+      "name": "workplacesim",
+      "source": "./plugin",
+      "description": "Reports Claude Code subagent activity to the workplacesim visualizer."
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "description": "Reports Claude Code subagent activity to the workplacesim visualizer.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/workplacesim-hook.sh pretool"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/workplacesim-hook.sh stop"
+          }
+        ]
+      }
+    ]
+  }
+}

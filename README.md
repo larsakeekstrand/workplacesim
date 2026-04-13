@@ -22,27 +22,52 @@ npm start
 Env vars: `PORT` (default `4317`), `HOST` (default `127.0.0.1`; set to `0.0.0.0`
 to accept hook posts from other machines on the LAN).
 
-## Install the hook (per machine)
+## Install as a Claude Code plugin
 
-1. Edit `hook/settings.snippet.json` — replace the three
-   `/ABSOLUTE/PATH/TO/workplacesim/hook/workplacesim-hook.sh` occurrences with
-   the real path on that machine.
-2. Merge the `hooks` section into `~/.claude/settings.json`.
-3. `chmod +x /path/to/workplacesim/hook/workplacesim-hook.sh`.
+The hook side ships as a Claude Code plugin in `plugin/`. Install it from
+this repo as a one-plugin marketplace:
 
-To point the hook at a server on another host, set
+```
+/plugin marketplace add /absolute/path/to/workplacesim
+/plugin install workplacesim
+```
+
+That's it — the plugin registers `PreToolUse` (matcher `Agent`),
+`SubagentStart`, and `SubagentStop` hooks automatically; no need to edit
+`~/.claude/settings.json`. From any Claude Code session you can also run
+`/workplacesim` for a quick status check on the visualizer server.
+
+To point the plugin at a visualizer running on another host, set
 `WORKPLACESIM_URL=http://<host>:4317` in the environment Claude Code runs in
 (e.g. your shell profile).
+
+See `plugin/README.md` for details on what the plugin registers.
 
 ## Hook simulator (no real Claude needed)
 
 ```sh
 npm run simulate
-# flags: --rate=1500 --max-concurrent=8 --min-duration=4000 --max-duration=18000 --total=20 --url=http://...
+# flags: --rate=1500 --max-concurrent=8 --min-duration=4000 --max-duration=18000 --total=20 --plan-ratio=0.25 --url=http://...
 ```
 
 Generates fake pretool + start + stop traffic with random users, hosts, agent
-types, and descriptions so you can watch the room fill up. Ctrl+C to stop.
+types, and descriptions so you can watch the room fill up. `--plan-ratio` (0..1)
+sets the chance each fake agent runs in plan mode. Ctrl+C to stop.
+
+## Routing rules
+
+Each agent is sorted into one of three rooms when it starts. Priority:
+
+1. **Test lab** — if `agent_type` or `description` contains `"test"`
+   (case-insensitive). Sim gets a `🧪` badge, walks through the lab door,
+   and sits at a workbench station with a scope and test rig.
+2. **Meeting room** — `permission_mode === "plan"`. Sim gets a `📋` badge,
+   walks through the meeting door, and takes a chair at the conference
+   table with the whiteboard.
+3. **Open plan** — everyone else; assigned the first free desk.
+
+The classification is captured once at `SubagentStart`. Mid-run changes
+to mode or description are not currently reflected.
 
 ## Smoke test (single agent)
 
