@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>workplacesim</title>
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: #0b0d12;
+        color: #e6e6e6;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        overflow: hidden;
+      }
+      #hud {
+        position: fixed;
+        top: 10px;
+        left: 12px;
+        font-size: 12px;
+        opacity: 0.7;
+        pointer-events: none;
+      }
+      #status {
+        position: fixed;
+        top: 10px;
+        right: 12px;
+        font-size: 12px;
+        opacity: 0.7;
+      }
+      #game { width: 100vw; height: 100vh; }
+    </style>
+  </head>
+  <body>
+    <div id="hud">workplacesim · claude agents</div>
+    <div id="status">connecting…</div>
+    <div id="game"></div>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

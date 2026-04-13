@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>workplacesim · tile picker</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: ui-monospace, Menlo, monospace;
+        background: #14181f;
+        color: #e6e6e6;
+      }
+      header {
+        position: sticky;
+        top: 0;
+        background: #0b0d12;
+        border-bottom: 1px solid #232b39;
+        padding: 8px 12px;
+        display: flex;
+        gap: 16px;
+        align-items: center;
+      }
+      header input[type="range"] { width: 160px; }
+      #grid {
+        display: grid;
+        gap: 2px;
+        padding: 12px;
+        background: #0b0d12;
+      }
+      .tile {
+        position: relative;
+        image-rendering: pixelated;
+        cursor: pointer;
+        border: 1px solid transparent;
+      }
+      .tile:hover { border-color: #ffda72; }
+      .tile.picked { border-color: #62d7ff; }
+      .tile .idx {
+        position: absolute;
+        left: 0;
+        bottom: 0;
+        font-size: 9px;
+        background: #000a;
+        padding: 0 2px;
+        color: #9ac8ff;
+      }
+      #out {
+        position: fixed;
+        right: 12px;
+        top: 56px;
+        width: 240px;
+        max-height: 60vh;
+        background: #0b0d12;
+        border: 1px solid #232b39;
+        padding: 8px;
+        overflow: auto;
+        font-size: 11px;
+      }
+      #out .slot { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; }
+      #out .slot input { flex: 1; background: #14181f; color: #e6e6e6; border: 1px solid #232b39; padding: 2px 4px; font: inherit; }
+      #out button { background: #62d7ff; color: #000; border: none; padding: 4px 8px; font: inherit; cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <strong>tile picker</strong>
+      <label>zoom <input id="zoom" type="range" min="2" max="6" value="3" /></label>
+      <span id="info">click tiles to assign to the active slot on the right →</span>
+    </header>
+    <div id="out"></div>
+    <div id="grid"></div>
+
+    <script>
+      const COLS = 49, ROWS = 22, TILE = 16;
+      const SLOTS = ["floor", "floorAlt", "wallH", "wallV", "wallCorner", "desk", "chair", "computer", "door", "plant", "char1", "char2", "char3", "char4", "char5", "char6"];
+      const picks = Object.fromEntries(SLOTS.map(s => [s, null]));
+      let active = SLOTS[0];
+
+      const out = document.getElementById("out");
+      function renderOut() {
+        out.replaceChildren();
+        for (const s of SLOTS) {
+          const row = document.createElement("div");
+          row.className = "slot";
+          const label = document.createElement("label");
+          label.textContent = s;
+          label.style.color = s === active ? "#ffda72" : "#9ac8ff";
+          label.style.cursor = "pointer";
+          label.onclick = () => { active = s; renderOut(); };
+          const input = document.createElement("input");
+          input.value = picks[s] ?? "";
+          input.onchange = () => {
+            picks[s] = input.value ? Number(input.value) : null;
+            paintPicks();
+          };
+          row.append(label, input);
+          out.append(row);
+        }
+        const btn = document.createElement("button");
+        btn.textContent = "copy JSON";
+        btn.onclick = () => navigator.clipboard.writeText(JSON.stringify(picks, null, 2));
+        out.append(btn);
+      }
+
+      function paintPicks() {
+        document.querySelectorAll(".tile").forEach(t => t.classList.remove("picked"));
+        for (const s of SLOTS) {
+          const idx = picks[s];
+          if (idx == null) continue;
+          const el = document.querySelector(`.tile[data-idx="${idx}"]`);
+          if (el) el.classList.add("picked");
+        }
+      }
+
+      const grid = document.getElementById("grid");
+      const zoom = document.getElementById("zoom");
+      function renderGrid() {
+        const z = Number(zoom.value);
+        grid.style.gridTemplateColumns = `repeat(${COLS}, ${TILE * z}px)`;
+        grid.replaceChildren();
+        for (let i = 0; i < COLS * ROWS; i++) {
+          const row = Math.floor(i / COLS);
+          const col = i % COLS;
+          const d = document.createElement("div");
+          d.className = "tile";
+          d.dataset.idx = i;
+          d.style.width = d.style.height = `${TILE * z}px`;
+          d.style.background = `url(/assets/kenney-1bit/tiles.png) -${col * TILE * z}px -${row * TILE * z}px / ${COLS * TILE * z}px ${ROWS * TILE * z}px`;
+          const idx = document.createElement("span");
+          idx.className = "idx";
+          idx.textContent = String(i);
+          d.append(idx);
+          d.onclick = () => {
+            picks[active] = i;
+            const cur = SLOTS.indexOf(active);
+            active = SLOTS[(cur + 1) % SLOTS.length];
+            renderOut();
+            paintPicks();
+          };
+          grid.append(d);
+        }
+        paintPicks();
+      }
+
+      zoom.oninput = renderGrid;
+      renderGrid();
+      renderOut();
+    </script>
+  </body>
+</html>
