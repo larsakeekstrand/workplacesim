@@ -40,10 +40,19 @@ workplacesim/
 
 ## Hook wiring (non-obvious lessons the hard way)
 
+- **Two independent lifecycles produce sims**:
+  1. **Main session sim** — `SessionStart` spawns a sim with
+     `agent_id = session_id`, `agent_type = "claude"`; `SessionEnd`
+     removes it. This is why the office is occupied whenever Claude
+     Code is running at all, even with no subagents. Because
+     `agent_id = session_id` is stable, the `SubagentStop` FIFO
+     fallback is *only* exercised by subagent stops, not session
+     stops.
+  2. **Subagent sims** — one per `Agent` tool invocation (see below).
 - **`SubagentStart` is not a real Claude Code hook event.** Earlier doc
   lookups suggested otherwise; the runtime does not fire it. The real
-  lifecycle is: `PreToolUse` (matcher `"Agent"`) → the subagent runs →
-  `SubagentStop`.
+  subagent lifecycle is: `PreToolUse` (matcher `"Agent"`) → the
+  subagent runs → `SubagentStop`.
 - `PreToolUse(Agent)` gives us `tool_use_id`, `session_id`, `cwd`,
   `permission_mode`, and `tool_input.{subagent_type,description}`.
   The hook script reshapes this into a `/hooks/subagent-start` request:

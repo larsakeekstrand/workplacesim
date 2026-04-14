@@ -130,9 +130,21 @@ function skinColor(user) {
   return SKIN_TONES[hashStr(user || "?") % SKIN_TONES.length];
 }
 
-function isTestAgent(agent) {
+const LAB_KEYWORDS = [
+  "test",
+  "spec",
+  "review",
+  "verify",
+  "verifier",
+  "lint",
+  "bench",
+  "analyzer",
+  "hunter",
+  "qa",
+];
+function isLabAgent(agent) {
   const haystack = `${agent.agent_type || ""} ${agent.description || ""}`.toLowerCase();
-  return haystack.includes("test");
+  return LAB_KEYWORDS.some((k) => haystack.includes(k));
 }
 
 const desks = [];
@@ -836,17 +848,28 @@ class RoomScene extends Phaser.Scene {
         this.destroySim(sim);
         this.sims.delete(id);
       }
-      for (const a of msg.agents) this.spawnSim(a, { immediate: true });
+      for (const a of msg.agents) {
+        this.spawnSim(a, { immediate: true });
+        if (a.visit && a.visit.room && a.visit.until > Date.now()) {
+          const sim = this.sims.get(a.agent_id);
+          if (sim) this.visitTo(sim, a.visit.room);
+        }
+      }
     } else if (msg.type === "start") {
       this.spawnSim(msg.agent, { immediate: false });
     } else if (msg.type === "stop") {
       const sim = this.sims.get(msg.agent_id);
       if (sim) this.dismissSim(sim);
+    } else if (msg.type === "visit") {
+      const sim = this.sims.get(msg.agent_id);
+      if (!sim) return;
+      if (msg.room) this.visitTo(sim, msg.room);
+      else this.returnFromVisit(sim);
     }
   }
 
   classify(agent) {
-    if (isTestAgent(agent)) return "test";
+    if (isLabAgent(agent)) return "test";
     if (agent.permission_mode === "plan") return "plan";
     return "default";
   }
@@ -880,11 +903,71 @@ class RoomScene extends Phaser.Scene {
     return { kind: "queue", x: spot.x, y: spot.y };
   }
 
+  releaseTargetEntry(target) {
+    if (!target) return;
+    if (target.kind === "desk") target.desk.taken = false;
+    if (target.kind === "meeting") target.seat.taken = false;
+    if (target.kind === "lab") target.station.taken = false;
+  }
+
   releaseTarget(sim) {
+    this.releaseTargetEntry(sim.target);
+    this.releaseTargetEntry(sim.homeTarget);
+    sim.homeTarget = null;
+  }
+
+  pickLabTarget() {
+    const station = findFreeLabStation();
+    if (station) {
+      station.taken = true;
+      return { kind: "lab", station };
+    }
+    const spot = LAB_QUEUE_SPOTS[this.queuedLabOverflow++ % LAB_QUEUE_SPOTS.length];
+    return { kind: "lab-queue", x: spot.x, y: spot.y };
+  }
+
+  stopMotion(sim) {
+    if (sim.walkTween) {
+      sim.walkTween.stop();
+      sim.walkTween = null;
+    }
+    if (sim.bobTween) {
+      sim.bobTween.stop();
+      sim.bobTween = null;
+    }
+    sim.seated = false;
+    sim.label.setAlpha(1);
+  }
+
+  visitTo(sim, room) {
+    if (room !== "test") return;
+    if (sim.visiting) return;
     if (!sim.target) return;
-    if (sim.target.kind === "desk") sim.target.desk.taken = false;
-    if (sim.target.kind === "meeting") sim.target.seat.taken = false;
-    if (sim.target.kind === "lab") sim.target.station.taken = false;
+    if (sim.target.kind === "lab" || sim.target.kind === "lab-queue") return;
+    const visitTarget = this.pickLabTarget();
+    this.stopMotion(sim);
+    sim.homeTarget = sim.target;
+    sim.target = visitTarget;
+    sim.visiting = true;
+    this.walkPath(sim, this.pathFromDoorTo(visitTarget), () => {
+      if (visitTarget.kind === "lab") this.startBob(sim);
+    });
+  }
+
+  returnFromVisit(sim) {
+    if (!sim.visiting || !sim.homeTarget) return;
+    this.stopMotion(sim);
+    this.releaseTargetEntry(sim.target);
+    sim.target = sim.homeTarget;
+    sim.homeTarget = null;
+    sim.visiting = false;
+    this.walkPath(sim, this.pathFromDoorTo(sim.target), () => {
+      const seated =
+        sim.target.kind === "desk" ||
+        sim.target.kind === "meeting" ||
+        sim.target.kind === "lab";
+      if (seated) this.startBob(sim);
+    });
   }
 
   spawnSim(agent, { immediate }) {
@@ -934,6 +1017,8 @@ class RoomScene extends Phaser.Scene {
       sprite,
       label,
       target,
+      homeTarget: null,
+      visiting: false,
       kind,
       bobTween: null,
       walkTween: null,

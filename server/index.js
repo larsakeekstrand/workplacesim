@@ -7,6 +7,7 @@ import {
   startAgent,
   stopAgent,
   subscribe,
+  visitRoom,
 } from "./state.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -46,6 +47,11 @@ app.post("/hooks/subagent-start", (req, res) => {
 
 app.post("/hooks/subagent-stop", (req, res) => {
   stopAgent(req.body || {});
+  res.sendStatus(204);
+});
+
+app.post("/hooks/lab-visit", (req, res) => {
+  visitRoom(req.body || {});
   res.sendStatus(204);
 });
 

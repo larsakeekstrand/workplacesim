@@ -1,8 +1,13 @@
 const PENDING_TTL_MS = 60_000;
 const STOP_GRACE_MS = 10_000;
 
+const VISIT_ROOMS = new Set(["test", "meeting", "desk"]);
+const VISIT_MIN_MS = 1_000;
+const VISIT_MAX_MS = 120_000;
+
 const activeAgents = new Map();
 const pendingDescriptions = new Map();
+const visitTimers = new Map();
 const subscribers = new Set();
 
 const pendingKey = (sessionId, subagentType) => `${sessionId ?? ""}::${subagentType ?? ""}`;
@@ -59,11 +64,13 @@ export function startAgent(raw) {
     user,
     host,
     permission_mode,
+    description: rawDescription,
   } = raw;
   if (!agent_id) return null;
   if (activeAgents.has(agent_id)) return activeAgents.get(agent_id);
 
-  const description = consumeDescription(session_id, agent_type) || agent_type || "agent";
+  const description =
+    rawDescription || consumeDescription(session_id, agent_type) || agent_type || "agent";
   const record = {
     agent_id,
     session_id: session_id ?? null,
@@ -100,9 +107,53 @@ export function stopAgent(raw) {
   if (!record) return null;
   record.finished_at = Date.now();
   record.last_message = last_assistant_message ?? null;
+  const priorVisit = visitTimers.get(record.agent_id);
+  if (priorVisit) {
+    clearTimeout(priorVisit);
+    visitTimers.delete(record.agent_id);
+  }
   broadcast({ type: "stop", agent_id: record.agent_id });
   const targetId = record.agent_id;
   setTimeout(() => activeAgents.delete(targetId), STOP_GRACE_MS);
+  return record;
+}
+
+export function visitRoom(raw) {
+  const { session_id, agent_id, room, ttl_ms } = raw || {};
+  if (!VISIT_ROOMS.has(room)) return null;
+  const ttl = Math.max(VISIT_MIN_MS, Math.min(VISIT_MAX_MS, Number(ttl_ms) || 20_000));
+
+  let record = agent_id ? activeAgents.get(agent_id) : null;
+  if (!record && session_id) record = activeAgents.get(session_id);
+  if (!record && session_id) {
+    for (const r of activeAgents.values()) {
+      if (r.finished_at) continue;
+      if (r.session_id === session_id) {
+        record = r;
+        break;
+      }
+    }
+  }
+  if (!record || record.finished_at) return null;
+
+  const now = Date.now();
+  const until = Math.max(record.visit?.until ?? 0, now + ttl);
+  record.visit = { room, until };
+  broadcast({ type: "visit", agent_id: record.agent_id, room, until });
+
+  const prior = visitTimers.get(record.agent_id);
+  if (prior) clearTimeout(prior);
+  const targetId = record.agent_id;
+  const timer = setTimeout(() => {
+    visitTimers.delete(targetId);
+    const current = activeAgents.get(targetId);
+    if (!current || !current.visit) return;
+    if (current.visit.until > Date.now()) return;
+    current.visit = null;
+    broadcast({ type: "visit", agent_id: targetId, room: null });
+  }, until - now + 50);
+  timer.unref?.();
+  visitTimers.set(targetId, timer);
   return record;
 }
 
