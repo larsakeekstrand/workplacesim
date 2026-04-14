@@ -1,23 +1,38 @@
 # workplacesim (Claude Code plugin)
 
-Streams Claude Code subagent activity to the local **workplacesim** visualizer
-server. When you dispatch a subagent in any Claude Code session with this
-plugin enabled, a sim walks into the visualizer's room and sits at a desk;
-when the subagent finishes, the sim leaves.
+Streams Claude Code session + subagent activity to the local **workplacesim**
+visualizer server. With the plugin enabled, the office fills up whenever
+Claude is running: each session is a sim, subagents tether to their parent
+session, and every tool call / plan-mode toggle / file edit / test run shows
+up as ambient motion in the scene.
 
 ## What it registers
 
-Three async hooks (all background, never block agent execution):
+All hooks are background and fire-and-forget — the script curls to a local
+HTTP endpoint with a 2 s timeout and exits 0 on anything going wrong, so a
+down visualizer never blocks a Claude session.
 
-- `PreToolUse` (matcher: `Agent`) — buffers the agent description from the Task
-  call so the visualizer can show it as a label.
-- `SubagentStart` — emits the sim "walks in" event.
-- `SubagentStop` — emits the sim "walks out" event.
+| Event | Matcher | Purpose |
+|---|---|---|
+| `SessionStart` | — | Spawn the main session sim. |
+| `SessionEnd` | — | Dismiss the main session sim. |
+| `PreToolUse` | `Agent` | Spawn a subagent sim with a tether from the session. |
+| `PreToolUse` | `Write\|Edit\|MultiEdit` | File-touch ticker; lab visit on test-file paths. |
+| `PreToolUse` | *(broad tool list)* | Tool-call motes; permission-mode reclassify. |
+| `PostToolUse` | `Bash` | Lab bench monitor flash; lab visit on test-runner commands. |
+| `PostToolUse` | *(broad tool list)* | Red halo + `!` glyph on `tool_response.error`. |
+| `UserPromptSubmit` | — | Update the meeting-room whiteboard; clear idle. |
+| `Notification` | — | `💤` idle glyph on the session sim. |
+| `Stop` | — | Head-wag wave on turn end. |
+| `SubagentStop` | — | Dismiss the subagent sim. |
+
+**Restart Claude Code after install.** `/reload-plugins` is not enough to
+activate new event subscriptions.
 
 One slash command:
 
-- `/workplacesim` — checks if the visualizer server is reachable and lists the
-  current active agents and which room they're in.
+- `/workplacesim` — checks if the visualizer server is reachable and lists
+  the currently active agents and which room they're in.
 
 ## Configuration
 
@@ -30,9 +45,9 @@ Two environment variables, both optional:
 
 ## Dependencies
 
-- `jq` and `curl` on `$PATH`. If `jq` is missing the hook script exits 0 silently
-  and no events are sent — your Claude session is unaffected, you just won't see
-  sims appear.
+- `jq` and `curl` on `$PATH`. If `jq` is missing the hook script exits 0
+  silently and no events are sent — your Claude session is unaffected, you
+  just won't see sims appear.
 
 ## Running the visualizer
 
