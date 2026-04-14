@@ -9,6 +9,8 @@
 #                    description; POSTs to /hooks/subagent-start.
 #   pretool-file   — PreToolUse(Write|Edit|MultiEdit) payload. If tool_input.file_path
 #                    looks like a test/spec/fixture path, POSTs a short lab visit.
+#   pretool-any    — PreToolUse for any tool. POSTs a tiny tool-event ping so the
+#                    frontend can spawn a pixel mote over the session sim's head.
 #   posttool-bash  — PostToolUse(Bash) payload. If tool_input.command looks like a
 #                    test-runner invocation, POSTs a longer lab visit.
 #   stop           — SubagentStop payload. POSTs as-is to /hooks/subagent-stop.
@@ -85,17 +87,50 @@ case "$sub" in
     # Heuristic: common test-runner invocations. Case-insensitive, tolerant of
     # leading pipes/&&/;/spaces. Intentionally conservative to avoid false
     # positives like `testfile.txt` or `best-option`.
-    if ! printf '%s' "$cmd" | grep -qiE '(^|[;&|[:space:]])(npm|yarn|pnpm|bun|deno)([[:space:]]+run)?([[:space:]]+-s)?[[:space:]]+test([[:space:]:@]|$)|(^|[;&|[:space:]])(pytest|vitest|jest|mocha|ava|rspec|phpunit|tox|ward|nox)([[:space:]]|$)|(^|[;&|[:space:]])(go|cargo|dotnet|mix|swift)[[:space:]]+test([[:space:]]|$)|(^|[;&|[:space:]])(make|just|task)[[:space:]]+test([[:space:]]|$)'; then
-      exit 0
+    if printf '%s' "$cmd" | grep -qiE '(^|[;&|[:space:]])(npm|yarn|pnpm|bun|deno)([[:space:]]+run)?([[:space:]]+-s)?[[:space:]]+test([[:space:]:@]|$)|(^|[;&|[:space:]])(pytest|vitest|jest|mocha|ava|rspec|phpunit|tox|ward|nox)([[:space:]]|$)|(^|[;&|[:space:]])(go|cargo|dotnet|mix|swift)[[:space:]]+test([[:space:]]|$)|(^|[;&|[:space:]])(make|just|task)[[:space:]]+test([[:space:]]|$)'; then
+      lab_payload=$(printf '%s' "$input" | jq --arg user "$user_arg" --arg host "$host_arg" '
+        {
+          session_id: .session_id,
+          agent_id: .session_id,
+          room: "test",
+          source: "bash",
+          ttl_ms: 20000,
+          permission_mode: (.permission_mode // "default"),
+          user: $user,
+          host: $host
+        }')
+      curl -fsS --max-time 2 \
+        -H "content-type: application/json" \
+        -d "$lab_payload" \
+        "${URL}/hooks/lab-visit" >/dev/null 2>&1 || true
     fi
-    route="/hooks/lab-visit"
+    # Always emit a bash-result lifecycle event, regardless of test-match.
+    result_payload=$(printf '%s' "$input" | jq --arg user "$user_arg" --arg host "$host_arg" '
+      {
+        kind: "bash-result",
+        session_id: .session_id,
+        agent_id: .session_id,
+        ok: (((.tool_response.exit_code // -1) | tonumber) == 0),
+        permission_mode: (.permission_mode // "default"),
+        user: $user,
+        host: $host
+      }')
+    curl -fsS --max-time 2 \
+      -H "content-type: application/json" \
+      -d "$result_payload" \
+      "${URL}/hooks/lifecycle" >/dev/null 2>&1 || true
+    exit 0
+    ;;
+  pretool-any)
+    tool_name=$(printf '%s' "$input" | jq -r '.tool_name // ""')
+    [ -n "$tool_name" ] || exit 0
+    route="/hooks/tool-event"
     payload=$(printf '%s' "$input" | jq --arg user "$user_arg" --arg host "$host_arg" '
       {
         session_id: .session_id,
         agent_id: .session_id,
-        room: "test",
-        source: "bash",
-        ttl_ms: 20000,
+        tool_name: (.tool_name // ""),
+        permission_mode: (.permission_mode // "default"),
         user: $user,
         host: $host
       }')
@@ -108,20 +143,113 @@ case "$sub" in
     esac
     file_path=$(printf '%s' "$input" | jq -r '.tool_input.file_path // ""')
     [ -n "$file_path" ] || exit 0
-    if ! printf '%s' "$file_path" | grep -qiE '(^|/)[^/]*\.(test|spec)\.[cmt]?[jt]sx?$|(^|/)[^/]*_test\.(go|py|rs)$|(^|/)[^/]*_spec\.rb$|(^|/)test_[^/]*\.py$|(^|/)(tests?|__tests__|spec|specs|fixtures)(/|$)'; then
-      exit 0
+    if printf '%s' "$file_path" | grep -qiE '(^|/)[^/]*\.(test|spec)\.[cmt]?[jt]sx?$|(^|/)[^/]*_test\.(go|py|rs)$|(^|/)[^/]*_spec\.rb$|(^|/)test_[^/]*\.py$|(^|/)(tests?|__tests__|spec|specs|fixtures)(/|$)'; then
+      lab_payload=$(printf '%s' "$input" | jq --arg user "$user_arg" --arg host "$host_arg" '
+        {
+          session_id: .session_id,
+          agent_id: .session_id,
+          room: "test",
+          source: "edit",
+          ttl_ms: 8000,
+          permission_mode: (.permission_mode // "default"),
+          user: $user,
+          host: $host
+        }')
+      curl -fsS --max-time 2 \
+        -H "content-type: application/json" \
+        -d "$lab_payload" \
+        "${URL}/hooks/lab-visit" >/dev/null 2>&1 || true
     fi
-    route="/hooks/lab-visit"
-    payload=$(printf '%s' "$input" | jq --arg user "$user_arg" --arg host "$host_arg" '
+    # Always emit a file-touch lifecycle event, regardless of path.
+    touch_payload=$(printf '%s' "$input" | jq --arg user "$user_arg" --arg host "$host_arg" '
       {
+        kind: "file-touch",
         session_id: .session_id,
         agent_id: .session_id,
-        room: "test",
-        source: "edit",
-        ttl_ms: 8000,
+        path: (.tool_input.file_path // ""),
+        permission_mode: (.permission_mode // "default"),
         user: $user,
         host: $host
       }')
+    curl -fsS --max-time 2 \
+      -H "content-type: application/json" \
+      -d "$touch_payload" \
+      "${URL}/hooks/lifecycle" >/dev/null 2>&1 || true
+    exit 0
+    ;;
+  user-prompt)
+    prompt_payload=$(printf '%s' "$input" | jq --arg user "$user_arg" --arg host "$host_arg" '
+      {
+        kind: "prompt",
+        session_id: .session_id,
+        agent_id: .session_id,
+        text: ((.prompt // "") | .[0:120]),
+        permission_mode: (.permission_mode // "default"),
+        user: $user,
+        host: $host
+      }')
+    curl -fsS --max-time 2 \
+      -H "content-type: application/json" \
+      -d "$prompt_payload" \
+      "${URL}/hooks/lifecycle" >/dev/null 2>&1 || true
+    exit 0
+    ;;
+  notification)
+    idle_payload=$(printf '%s' "$input" | jq --arg user "$user_arg" --arg host "$host_arg" '
+      {
+        kind: "idle",
+        session_id: .session_id,
+        agent_id: .session_id,
+        permission_mode: (.permission_mode // "default"),
+        user: $user,
+        host: $host
+      }')
+    curl -fsS --max-time 2 \
+      -H "content-type: application/json" \
+      -d "$idle_payload" \
+      "${URL}/hooks/lifecycle" >/dev/null 2>&1 || true
+    exit 0
+    ;;
+  stop-turn)
+    turn_payload=$(printf '%s' "$input" | jq --arg user "$user_arg" --arg host "$host_arg" '
+      {
+        kind: "turn-end",
+        session_id: .session_id,
+        agent_id: .session_id,
+        permission_mode: (.permission_mode // "default"),
+        user: $user,
+        host: $host
+      }')
+    curl -fsS --max-time 2 \
+      -H "content-type: application/json" \
+      -d "$turn_payload" \
+      "${URL}/hooks/lifecycle" >/dev/null 2>&1 || true
+    exit 0
+    ;;
+  posttool-any)
+    tool_name=$(printf '%s' "$input" | jq -r '.tool_name // ""')
+    [ -n "$tool_name" ] || exit 0
+    has_error=$(printf '%s' "$input" | jq -r '
+      if (.tool_response | type) == "object"
+         and ((.tool_response.error // "") | tostring | length) > 0
+      then "1" else "0" end')
+    [ "$has_error" = "1" ] || exit 0
+    err_payload=$(printf '%s' "$input" | jq --arg user "$user_arg" --arg host "$host_arg" '
+      {
+        kind: "tool-error",
+        session_id: .session_id,
+        agent_id: .session_id,
+        tool_name: (.tool_name // ""),
+        message: ((.tool_response.error // "") | tostring | .[0:60]),
+        permission_mode: (.permission_mode // "default"),
+        user: $user,
+        host: $host
+      }')
+    curl -fsS --max-time 2 \
+      -H "content-type: application/json" \
+      -d "$err_payload" \
+      "${URL}/hooks/lifecycle" >/dev/null 2>&1 || true
+    exit 0
     ;;
   *)
     exit 0

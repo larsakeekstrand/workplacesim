@@ -118,11 +118,7 @@ export function stopAgent(raw) {
   return record;
 }
 
-export function visitRoom(raw) {
-  const { session_id, agent_id, room, ttl_ms } = raw || {};
-  if (!VISIT_ROOMS.has(room)) return null;
-  const ttl = Math.max(VISIT_MIN_MS, Math.min(VISIT_MAX_MS, Number(ttl_ms) || 20_000));
-
+function findRecord({ agent_id, session_id }) {
   let record = agent_id ? activeAgents.get(agent_id) : null;
   if (!record && session_id) record = activeAgents.get(session_id);
   if (!record && session_id) {
@@ -134,7 +130,100 @@ export function visitRoom(raw) {
       }
     }
   }
-  if (!record || record.finished_at) return null;
+  return record && !record.finished_at ? record : null;
+}
+
+function checkPermissionMode(record, incoming) {
+  if (!record || !incoming) return;
+  if (record.permission_mode === incoming) return;
+  record.permission_mode = incoming;
+  broadcast({
+    type: "reclassify",
+    agent_id: record.agent_id,
+    permission_mode: incoming,
+  });
+}
+
+export function broadcastToolEvent({ agent_id, session_id, tool_name, permission_mode }) {
+  const id = agent_id || session_id;
+  if (!id || !tool_name) return;
+  const record = activeAgents.get(id);
+  if (!record) return;
+  checkPermissionMode(record, permission_mode);
+  broadcast({ type: "tool", agent_id: id, tool_name, ts: Date.now() });
+}
+
+const ERROR_PREVIEW_LEN = 80;
+const PROMPT_PREVIEW_LEN = 80;
+
+export function handleLifecycle(raw) {
+  const payload = raw || {};
+  const { kind, permission_mode } = payload;
+  const record = findRecord(payload);
+  if (!record) return null;
+  checkPermissionMode(record, permission_mode);
+
+  switch (kind) {
+    case "prompt": {
+      const text = (payload.text || "").slice(0, PROMPT_PREVIEW_LEN);
+      record.session_prompt = text;
+      if (record.idle) {
+        record.idle = false;
+        broadcast({ type: "idle", agent_id: record.agent_id, idle: false });
+      }
+      broadcast({ type: "prompt", agent_id: record.agent_id, text });
+      return record;
+    }
+    case "idle": {
+      if (!record.idle) {
+        record.idle = true;
+        broadcast({ type: "idle", agent_id: record.agent_id, idle: true });
+      }
+      return record;
+    }
+    case "turn-end": {
+      broadcast({ type: "turn-end", agent_id: record.agent_id });
+      return record;
+    }
+    case "file-touch": {
+      const path = payload.path;
+      if (!path) return record;
+      broadcast({ type: "file-touch", agent_id: record.agent_id, path });
+      return record;
+    }
+    case "bash-result": {
+      broadcast({
+        type: "bash-result",
+        agent_id: record.agent_id,
+        ok: !!payload.ok,
+      });
+      return record;
+    }
+    case "tool-error": {
+      const message = (payload.message || "").slice(0, ERROR_PREVIEW_LEN);
+      const toolName = payload.tool_name || "";
+      record.current_error = { tool_name: toolName, message, ts: Date.now() };
+      broadcast({
+        type: "tool-error",
+        agent_id: record.agent_id,
+        tool_name: toolName,
+        message,
+      });
+      return record;
+    }
+    default:
+      return null;
+  }
+}
+
+export function visitRoom(raw) {
+  const { session_id, agent_id, room, ttl_ms, permission_mode } = raw || {};
+  if (!VISIT_ROOMS.has(room)) return null;
+  const ttl = Math.max(VISIT_MIN_MS, Math.min(VISIT_MAX_MS, Number(ttl_ms) || 20_000));
+
+  const record = findRecord({ agent_id, session_id });
+  if (!record) return null;
+  checkPermissionMode(record, permission_mode);
 
   const now = Date.now();
   const until = Math.max(record.visit?.until ?? 0, now + ttl);

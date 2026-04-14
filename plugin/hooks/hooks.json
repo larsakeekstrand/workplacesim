@@ -39,6 +39,15 @@
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/workplacesim-hook.sh pretool-file"
           }
         ]
+      },
+      {
+        "matcher": "Bash|Read|Write|Edit|MultiEdit|Grep|Glob|LS|NotebookRead|NotebookEdit|Agent|Task|TaskCreate|TaskUpdate|TaskList|TaskGet|TaskOutput|TaskStop|WebFetch|WebSearch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/workplacesim-hook.sh pretool-any"
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -48,6 +57,45 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/workplacesim-hook.sh posttool-bash"
+          }
+        ]
+      },
+      {
+        "matcher": "Read|Write|Edit|MultiEdit|Grep|Glob|LS|NotebookRead|NotebookEdit|Bash|Agent|Task|TaskCreate|TaskUpdate|TaskList|TaskGet|TaskOutput|TaskStop|WebFetch|WebSearch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/workplacesim-hook.sh posttool-any"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/workplacesim-hook.sh user-prompt"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/workplacesim-hook.sh notification"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/workplacesim-hook.sh stop-turn"
           }
         ]
       }

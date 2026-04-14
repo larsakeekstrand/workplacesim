@@ -114,6 +114,16 @@ function truncate(s, n) {
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
 }
 
+// Render a path as "parent/basename" — one directory level of context, no more.
+function shortPath(p) {
+  if (!p) return "";
+  const clean = String(p).replace(/\\/g, "/").replace(/\/+$/, "");
+  const parts = clean.split("/").filter(Boolean);
+  if (!parts.length) return "";
+  if (parts.length === 1) return parts[0];
+  return parts.slice(-2).join("/");
+}
+
 function shirtColor(user) {
   const h = hashStr(user || "?");
   const hue = SHIRT_HUES[h % SHIRT_HUES.length];
@@ -129,6 +139,35 @@ function pantsColor(user) {
 function skinColor(user) {
   return SKIN_TONES[hashStr(user || "?") % SKIN_TONES.length];
 }
+
+const FOOTSTEP_LIFETIME_MS = 900;
+const FOOTSTEP_INTERVAL_MS = 120;
+const FOOTSTEP_MAX = 6;
+const TETHER_LIFETIME_MS = 2000;
+const GLYPH_IDLE_MS = 60_000;
+const WINDOW_SPILL_BASE_ALPHA = 0.08;
+const WINDOW_SPILL_PEAK_ALPHA = 0.22;
+const WINDOW_EVENT_WINDOW_MS = 10_000;
+const MOTE_LIFETIME_MS = 1200;
+const MOTE_CAP = 40;
+const MOTE_COLORS = {
+  Read: 0x7fc7ff,
+  Grep: 0x7fc7ff,
+  Glob: 0x7fc7ff,
+  LS: 0x7fc7ff,
+  NotebookRead: 0x7fc7ff,
+  Write: 0xffb86c,
+  Edit: 0xffb86c,
+  MultiEdit: 0xffb86c,
+  NotebookEdit: 0xffb86c,
+  Bash: 0x8be98b,
+  Agent: 0xff8fd4,
+  Task: 0xff8fd4,
+  TaskCreate: 0xff8fd4,
+  WebFetch: 0xc28fff,
+  WebSearch: 0xc28fff,
+};
+const MOTE_DEFAULT_COLOR = 0xcccccc;
 
 const LAB_KEYWORDS = [
   "test",
@@ -189,11 +228,10 @@ for (const cx of [TABLE.cx - 60, TABLE.cx + 60]) {
 }
 
 const labStations = LAB_STATION_XS.map((cx) => {
-  const stationY = BENCH.y + BENCH.h / 2;
   const seatY = BENCH.y + BENCH.h + 26;
   return {
     x: cx,
-    y: stationY,
+    y: seatY - 8,
     seatX: cx,
     seatY,
     approachX: cx,
@@ -257,6 +295,13 @@ class RoomScene extends Phaser.Scene {
     this.queuedOverflow = 0;
     this.queuedMeetingOverflow = 0;
     this.queuedLabOverflow = 0;
+    this.tethers = [];
+    this.motes = [];
+    this.recentEvents = [];
+    this.windowSpills = [];
+    this.fileTicker = [];
+    this.fileTickerDirty = false;
+    this.labMonitorCursor = 0;
   }
 
   create() {
@@ -267,8 +312,41 @@ class RoomScene extends Phaser.Scene {
     for (const d of desks) this.drawDesk(d);
     this.drawMeetingRoom();
     this.drawLabRoom();
+    this.drawFileTicker();
+    this.effects = this.add.graphics();
     this.buildSimTextures();
     this.connect();
+  }
+
+  drawFileTicker() {
+    // Anchored along open-plan north wall interior, below the wall, above desks.
+    // Left-aligned, single-line monospace, fades based on age of newest entry.
+    const tx = OPEN_ROOM.x + 10;
+    const ty = OPEN_ROOM.y + 20;
+    this.fileTickerText = this.add
+      .text(tx, ty, "", {
+        fontFamily: "ui-monospace, Menlo, monospace",
+        fontSize: "9px",
+        color: "#cfe6ff",
+        resolution: 2,
+      })
+      .setOrigin(0, 0)
+      .setAlpha(0);
+    this.fileTickerText.setDepth(5);
+  }
+
+  renderFileTicker() {
+    if (!this.fileTickerText) return;
+    if (!this.fileTicker.length) {
+      this.fileTickerText.setText("");
+      return;
+    }
+    const parts = this.fileTicker.map((e) => shortPath(e.path));
+    // join and truncate to fit open-plan room width.
+    const maxChars = Math.floor((OPEN_ROOM.w - 20) / 5.2);
+    let text = parts.join(" · ");
+    if (text.length > maxChars) text = text.slice(0, Math.max(0, maxChars - 1)) + "…";
+    this.fileTickerText.setText(text);
   }
 
   drawWindows() {
@@ -276,17 +354,15 @@ class RoomScene extends Phaser.Scene {
   }
 
   drawWindow(w) {
-    const g = this.add.graphics();
-    const fx = w.x - WINDOW_W / 2;
-    const fy = w.y - WINDOW_H / 2;
-
-    // light spill — drawn first so frame overlays it
+    // light spill — its own Graphics so the ambient loop can modulate alpha
+    // without redrawing frame/glass/mullions each frame.
     if (w.spill && w.roomEdgeY != null) {
+      const spill = this.add.graphics();
       const edgeY = w.roomEdgeY;
       const depth = 20;
       const farY = w.spill === "south" ? edgeY + depth : edgeY - depth;
-      g.fillStyle(PALETTE.windowGlass, 0.08);
-      g.fillPoints(
+      spill.fillStyle(PALETTE.windowGlass, 1);
+      spill.fillPoints(
         [
           { x: w.x - WINDOW_W / 2, y: edgeY },
           { x: w.x + WINDOW_W / 2, y: edgeY },
@@ -295,7 +371,13 @@ class RoomScene extends Phaser.Scene {
         ],
         true
       );
+      spill.setAlpha(WINDOW_SPILL_BASE_ALPHA);
+      this.windowSpills.push(spill);
     }
+
+    const g = this.add.graphics();
+    const fx = w.x - WINDOW_W / 2;
+    const fy = w.y - WINDOW_H / 2;
 
     // frame
     g.fillStyle(PALETTE.windowFrame, 1);
@@ -567,6 +649,22 @@ class RoomScene extends Phaser.Scene {
     g.fillStyle(0x4aa35a, 1);
     g.fillRect(wbX + 96, wbY + wbH + 1, 12, 2);
 
+    // Live whiteboard text layer — hidden by default; revealed when the
+    // session sim is seated in the meeting room and has a session_prompt.
+    this.whiteboardRect = { x: wbX, y: wbY, w: wbW, h: wbH };
+    this.whiteboardText = this.add
+      .text(wbX + 4, wbY + 3, "", {
+        fontFamily: "ui-monospace, Menlo, monospace",
+        fontSize: "9px",
+        color: "#1a1f28",
+        wordWrap: { width: wbW - 8 },
+        resolution: 2,
+        lineSpacing: 1,
+      })
+      .setOrigin(0, 0)
+      .setAlpha(0)
+      .setDepth(4);
+
     // conference table (smaller)
     const tx = TABLE.cx - TABLE.w / 2;
     const ty = TABLE.cy - TABLE.h / 2;
@@ -695,6 +793,15 @@ class RoomScene extends Phaser.Scene {
     g.fillRoundedRect(mx - 1, my - 1, mw + 2, mh + 2, 1);
     g.fillStyle(PALETTE.monitor, 1);
     g.fillRect(mx, my, mw, mh);
+    // tint overlay Graphics — separate layer so pass/fail flashes don't
+    // disturb the static scope trace art drawn below.
+    const tint = this.add.graphics();
+    tint.setAlpha(0);
+    const station = labStations.find((s) => s.x === cx);
+    if (station) {
+      station.monitorG = tint;
+      station.monitorRect = { mx, my, mw, mh };
+    }
     // green test output
     g.fillStyle(0x0c2014, 1);
     g.fillRect(mx + 1, my + 1, mw - 2, mh - 2);
@@ -842,6 +949,7 @@ class RoomScene extends Phaser.Scene {
   }
 
   onEvent(msg) {
+    this.recentEvents.push(Date.now());
     if (msg.type === "snapshot") {
       for (const [id, sim] of this.sims) {
         this.releaseTarget(sim);
@@ -865,7 +973,180 @@ class RoomScene extends Phaser.Scene {
       if (!sim) return;
       if (msg.room) this.visitTo(sim, msg.room);
       else this.returnFromVisit(sim);
+    } else if (msg.type === "tool") {
+      this.spawnMote(msg.agent_id, msg.tool_name);
+    } else if (msg.type === "reclassify") {
+      const sim = this.sims.get(msg.agent_id);
+      if (sim) this.reclassifySim(sim, msg.permission_mode);
+    } else if (msg.type === "file-touch") {
+      this.pushFileTouch(msg.path);
+    } else if (msg.type === "bash-result") {
+      this.flashLabMonitor(!!msg.ok);
+    } else if (msg.type === "prompt") {
+      const sim = this.sims.get(msg.agent_id);
+      if (sim) {
+        sim.sessionPrompt = msg.text || "";
+        sim.idle = false;
+        this.refreshWhiteboard();
+      }
+    } else if (msg.type === "idle") {
+      const sim = this.sims.get(msg.agent_id);
+      if (sim) sim.idle = !!msg.idle;
+    } else if (msg.type === "turn-end") {
+      const sim = this.sims.get(msg.agent_id);
+      if (sim) this.spawnTurnEndWave(sim);
+    } else if (msg.type === "tool-error") {
+      const sim = this.sims.get(msg.agent_id);
+      if (sim) this.spawnErrorHalo(sim);
     }
+  }
+
+  // Choose the sim whose sessionPrompt should populate the whiteboard. Prefer
+  // the session sim (agent_type === "claude") when one is seated in meeting;
+  // otherwise fall back to any sim seated in meeting with a prompt.
+  pickWhiteboardSim() {
+    let fallback = null;
+    for (const sim of this.sims.values()) {
+      if (!sim.seated) continue;
+      if (!sim.target || sim.target.kind !== "meeting") continue;
+      if (!sim.sessionPrompt) continue;
+      if (sim.agent && sim.agent.agent_type === "claude") return sim;
+      if (!fallback) fallback = sim;
+    }
+    return fallback;
+  }
+
+  refreshWhiteboard() {
+    if (!this.whiteboardText) return;
+    const sim = this.pickWhiteboardSim();
+    if (sim) {
+      this.whiteboardText.setText(sim.sessionPrompt);
+      this.tweens.killTweensOf(this.whiteboardText);
+      this.tweens.add({
+        targets: this.whiteboardText,
+        alpha: 0.9,
+        duration: 220,
+        ease: "sine.out",
+      });
+    } else {
+      this.tweens.killTweensOf(this.whiteboardText);
+      this.tweens.add({
+        targets: this.whiteboardText,
+        alpha: 0,
+        duration: 220,
+        ease: "sine.in",
+        onComplete: () => this.whiteboardText.setText(""),
+      });
+    }
+  }
+
+  spawnTurnEndWave(sim) {
+    if (!sim || !sim.seated) return;
+    if (!sim.sprite || !sim.sprite.head) return;
+    const head = sim.sprite.head;
+    this.tweens.killTweensOf(head);
+    head.x = 0;
+    this.tweens.add({
+      targets: head,
+      x: 1,
+      duration: 120,
+      yoyo: true,
+      repeat: 3,
+      ease: "sine.inOut",
+      onYoyo: () => {
+        head.x = -1;
+      },
+      onComplete: () => {
+        head.x = 0;
+      },
+    });
+  }
+
+  spawnErrorHalo(sim) {
+    if (!sim || !sim.sprite) return;
+    sim.errorUntil = performance.now() + 2000;
+    if (sim.haloG) {
+      this.tweens.killTweensOf(sim.haloG);
+      sim.haloG.destroy();
+      sim.haloG = null;
+    }
+    const g = this.add.graphics();
+    g.setDepth(6);
+    g.lineStyle(2, 0xff6464, 0.6);
+    g.strokeCircle(0, 0, 18);
+    g.x = sim.sprite.x;
+    g.y = sim.sprite.y;
+    sim.haloG = g;
+    this.tweens.add({
+      targets: g,
+      alpha: 0,
+      duration: 2000,
+      ease: "sine.out",
+      onUpdate: () => {
+        if (sim.sprite && sim.sprite.active) {
+          g.x = sim.sprite.x;
+          g.y = sim.sprite.y;
+        }
+      },
+      onComplete: () => {
+        g.destroy();
+        if (sim.haloG === g) sim.haloG = null;
+        sim.errorUntil = 0;
+      },
+    });
+  }
+
+  pushFileTouch(path) {
+    if (!path) return;
+    this.fileTicker.unshift({ path, t: performance.now() });
+    if (this.fileTicker.length > 8) this.fileTicker.length = 8;
+    this.renderFileTicker();
+  }
+
+  flashLabMonitor(ok) {
+    const station = labStations[this.labMonitorCursor % labStations.length];
+    this.labMonitorCursor = (this.labMonitorCursor + 1) % labStations.length;
+    if (!station || !station.monitorG) return;
+    const g = station.monitorG;
+    // kill any in-flight tween on this graphics to avoid stacking.
+    this.tweens.killTweensOf(g);
+    g.setAlpha(0.6);
+    g.clear();
+    const { mx, my, mw, mh } = station.monitorRect;
+    g.fillStyle(ok ? 0x6ef08e : 0xff6464, 1);
+    g.fillRect(mx, my, mw, mh);
+    this.tweens.add({
+      targets: g,
+      alpha: 0,
+      duration: 800,
+      ease: "sine.out",
+    });
+  }
+
+  spawnMote(agentId, toolName) {
+    const sim = this.sims.get(agentId);
+    if (!sim) return;
+    while (this.motes.length >= MOTE_CAP) {
+      const oldest = this.motes.shift();
+      if (oldest?.rect) oldest.rect.destroy();
+    }
+    const color = MOTE_COLORS[toolName] ?? MOTE_DEFAULT_COLOR;
+    const rect = this.add
+      .rectangle(sim.sprite.x, sim.sprite.y - 18, 2, 2, color, 1)
+      .setAlpha(0.9);
+    const mote = { rect, active: true };
+    this.motes.push(mote);
+    this.tweens.add({
+      targets: rect,
+      y: rect.y - 24,
+      alpha: 0,
+      duration: MOTE_LIFETIME_MS,
+      ease: "sine.out",
+      onComplete: () => {
+        rect.destroy();
+        mote.active = false;
+      },
+    });
   }
 
   classify(agent) {
@@ -939,35 +1220,57 @@ class RoomScene extends Phaser.Scene {
     sim.label.setAlpha(1);
   }
 
+  moveToTarget(sim, newTarget) {
+    const wasInMeeting =
+      sim.target && sim.target.kind === "meeting" && sim.seated;
+    this.stopMotion(sim);
+    sim.target = newTarget;
+    if (wasInMeeting && this.whiteboardText) this.refreshWhiteboard();
+    this.walkPath(sim, this.pathFromDoorTo(newTarget), () => {
+      const seated =
+        newTarget.kind === "desk" ||
+        newTarget.kind === "meeting" ||
+        newTarget.kind === "lab";
+      if (seated) this.startBob(sim);
+    });
+  }
+
   visitTo(sim, room) {
     if (room !== "test") return;
     if (sim.visiting) return;
     if (!sim.target) return;
     if (sim.target.kind === "lab" || sim.target.kind === "lab-queue") return;
     const visitTarget = this.pickLabTarget();
-    this.stopMotion(sim);
     sim.homeTarget = sim.target;
-    sim.target = visitTarget;
     sim.visiting = true;
-    this.walkPath(sim, this.pathFromDoorTo(visitTarget), () => {
-      if (visitTarget.kind === "lab") this.startBob(sim);
-    });
+    this.moveToTarget(sim, visitTarget);
   }
 
   returnFromVisit(sim) {
     if (!sim.visiting || !sim.homeTarget) return;
-    this.stopMotion(sim);
     this.releaseTargetEntry(sim.target);
-    sim.target = sim.homeTarget;
+    const home = sim.homeTarget;
     sim.homeTarget = null;
     sim.visiting = false;
-    this.walkPath(sim, this.pathFromDoorTo(sim.target), () => {
-      const seated =
-        sim.target.kind === "desk" ||
-        sim.target.kind === "meeting" ||
-        sim.target.kind === "lab";
-      if (seated) this.startBob(sim);
-    });
+    this.moveToTarget(sim, home);
+  }
+
+  reclassifySim(sim, newMode) {
+    if (!sim.agent) return;
+    if (sim.visiting) {
+      // Visit is a higher-priority temporary state; just update the stored
+      // mode so returnFromVisit lands in the right place next time.
+      sim.agent.permission_mode = newMode;
+      return;
+    }
+    sim.agent.permission_mode = newMode;
+    const newKind = this.classify(sim.agent);
+    if (newKind === sim.kind) return;
+    const oldTarget = sim.target;
+    const newTarget = this.pickTarget(sim.agent);
+    sim.kind = newKind;
+    this.releaseTargetEntry(oldTarget);
+    this.moveToTarget(sim, newTarget);
   }
 
   spawnSim(agent, { immediate }) {
@@ -1012,10 +1315,22 @@ class RoomScene extends Phaser.Scene {
       if (sim && sim.seated) label.setAlpha(0.35);
     });
 
+    const glyph = this.add
+      .text(startX, startY - 36, "", {
+        fontFamily: "ui-monospace, Menlo, monospace",
+        fontSize: "12px",
+        color: "#ffffff",
+        resolution: 2,
+      })
+      .setOrigin(0.5, 0.5)
+      .setAlpha(0.9);
+
     const sim = {
       id: agent.agent_id,
+      agent,
       sprite,
       label,
+      glyph,
       target,
       homeTarget: null,
       visiting: false,
@@ -1023,8 +1338,24 @@ class RoomScene extends Phaser.Scene {
       bobTween: null,
       walkTween: null,
       seated: false,
+      seatedAt: 0,
+      footsteps: [],
+      lastStepAt: 0,
+      shirtHex: shirtColor(agent.user || "unknown"),
+      sessionId: agent.session_id ?? null,
     };
     this.sims.set(agent.agent_id, sim);
+
+    if (agent.agent_id !== agent.session_id && agent.session_id) {
+      const parent = this.sims.get(agent.session_id);
+      if (parent) {
+        this.tethers.push({
+          fromId: parent.id,
+          toId: sim.id,
+          bornAt: performance.now(),
+        });
+      }
+    }
 
     if (immediate) this.startBob(sim);
     else this.walkIn(sim);
@@ -1097,6 +1428,8 @@ class RoomScene extends Phaser.Scene {
 
   startBob(sim) {
     sim.seated = true;
+    sim.seatedAt = Date.now();
+    if (this.whiteboardText) this.refreshWhiteboard();
     this.tweens.add({
       targets: sim.label,
       alpha: 0.35,
@@ -1113,17 +1446,23 @@ class RoomScene extends Phaser.Scene {
       onUpdate: () => {
         sim.label.x = sim.sprite.x;
         sim.label.y = sim.sprite.y + 32;
+        if (sim.glyph) {
+          sim.glyph.x = sim.sprite.x;
+          sim.glyph.y = sim.sprite.y - 36;
+        }
       },
     });
   }
 
   dismissSim(sim) {
+    const wasInMeeting = sim.target && sim.target.kind === "meeting";
     sim.seated = false;
     sim.label.setAlpha(1);
     if (sim.bobTween) {
       sim.bobTween.stop();
       sim.bobTween = null;
     }
+    if (wasInMeeting && this.whiteboardText) this.refreshWhiteboard();
     this.walkPath(sim, this.pathToDoorFrom(sim.target), () => {
       this.releaseTarget(sim);
       this.destroySim(sim);
@@ -1134,6 +1473,7 @@ class RoomScene extends Phaser.Scene {
   walkPath(sim, waypoints, onDone) {
     const step = (i) => {
       if (i >= waypoints.length) {
+        sim.walkTween = null;
         onDone?.();
         return;
       }
@@ -1161,6 +1501,16 @@ class RoomScene extends Phaser.Scene {
         onUpdate: () => {
           sim.label.x = sim.sprite.x;
           sim.label.y = sim.sprite.y + 32;
+          if (sim.glyph) {
+            sim.glyph.x = sim.sprite.x;
+            sim.glyph.y = sim.sprite.y - 36;
+          }
+          const now = performance.now();
+          if (now - (sim.lastStepAt || 0) >= FOOTSTEP_INTERVAL_MS) {
+            sim.lastStepAt = now;
+            sim.footsteps.push({ x: sim.sprite.x, y: sim.sprite.y + 10, t: now });
+            if (sim.footsteps.length > FOOTSTEP_MAX) sim.footsteps.shift();
+          }
         },
         onComplete: () => {
           legsTween.stop();
@@ -1175,8 +1525,115 @@ class RoomScene extends Phaser.Scene {
   destroySim(sim) {
     if (sim.bobTween) sim.bobTween.stop();
     if (sim.walkTween) sim.walkTween.stop();
+    if (sim.haloG) {
+      this.tweens.killTweensOf(sim.haloG);
+      sim.haloG.destroy();
+      sim.haloG = null;
+    }
     sim.sprite.destroy();
     sim.label.destroy();
+    if (sim.glyph) sim.glyph.destroy();
+  }
+
+  simGlyph(sim) {
+    if (sim.errorUntil && performance.now() < sim.errorUntil) return "!";
+    if (sim.visiting) return "🧪";
+    if (sim.idle && sim.seated) return "💤";
+    if (sim.walkTween) return "…";
+    if (sim.seated && sim.kind === "plan") return "📋";
+    if (sim.seated && sim.seatedAt && Date.now() - sim.seatedAt > GLYPH_IDLE_MS) return "Z";
+    return "";
+  }
+
+  update() {
+    const now = performance.now();
+    const g = this.effects;
+    if (!g) return;
+    g.clear();
+
+    // footstep trail — one pass across all sims, cheap per dot.
+    for (const sim of this.sims.values()) {
+      if (!sim.footsteps || sim.footsteps.length === 0) continue;
+      while (sim.footsteps.length && now - sim.footsteps[0].t > FOOTSTEP_LIFETIME_MS) {
+        sim.footsteps.shift();
+      }
+      for (const step of sim.footsteps) {
+        const age = now - step.t;
+        const alpha = 0.25 * Math.max(0, 1 - age / FOOTSTEP_LIFETIME_MS);
+        if (alpha <= 0) continue;
+        g.fillStyle(sim.shirtHex, alpha);
+        g.fillCircle(step.x, step.y, 2);
+      }
+      if (sim.glyph) {
+        const wanted = this.simGlyph(sim);
+        if (sim.glyph.text !== wanted) sim.glyph.setText(wanted);
+      }
+    }
+
+    // parent → child tether — dashed line from session sim to subagent, fading.
+    if (this.tethers.length) {
+      for (let i = this.tethers.length - 1; i >= 0; i--) {
+        const t = this.tethers[i];
+        const age = now - t.bornAt;
+        if (age > TETHER_LIFETIME_MS) {
+          this.tethers.splice(i, 1);
+          continue;
+        }
+        const from = this.sims.get(t.fromId);
+        const to = this.sims.get(t.toId);
+        if (!from || !to) {
+          this.tethers.splice(i, 1);
+          continue;
+        }
+        const alpha = 0.4 * (1 - age / TETHER_LIFETIME_MS);
+        const dx = to.sprite.x - from.sprite.x;
+        const dy = to.sprite.y - from.sprite.y;
+        const len = Math.hypot(dx, dy) || 1;
+        const nx = dx / len;
+        const ny = dy / len;
+        const dash = 4;
+        const gap = 3;
+        g.lineStyle(1, to.shirtHex, alpha);
+        for (let d = 0; d < len; d += dash + gap) {
+          const x1 = from.sprite.x + nx * d;
+          const y1 = from.sprite.y + ny * d;
+          const x2 = from.sprite.x + nx * Math.min(d + dash, len);
+          const y2 = from.sprite.y + ny * Math.min(d + dash, len);
+          g.lineBetween(x1, y1, x2, y2);
+        }
+      }
+    }
+
+    // window-light breathing — map recent event rate to spill alpha.
+    const cutoff = Date.now() - WINDOW_EVENT_WINDOW_MS;
+    while (this.recentEvents.length && this.recentEvents[0] < cutoff) {
+      this.recentEvents.shift();
+    }
+    const intensity = 1 - Math.exp(-this.recentEvents.length / 5);
+    const targetAlpha =
+      WINDOW_SPILL_BASE_ALPHA + (WINDOW_SPILL_PEAK_ALPHA - WINDOW_SPILL_BASE_ALPHA) * intensity;
+    for (const spill of this.windowSpills) {
+      spill.alpha += (targetAlpha - spill.alpha) * 0.08;
+    }
+
+    // tool-call motes — garbage-collect finished ones.
+    if (this.motes.length) {
+      for (let i = this.motes.length - 1; i >= 0; i--) {
+        if (!this.motes[i].active) this.motes.splice(i, 1);
+      }
+    }
+
+    // file-touch ticker alpha — peak 0.9 on a fresh entry, decay to 0.2 over 12 s.
+    if (this.fileTickerText) {
+      if (!this.fileTicker.length) {
+        this.fileTickerText.setAlpha(0);
+      } else {
+        const newestAge = now - this.fileTicker[0].t;
+        const k = Math.max(0, Math.min(1, newestAge / 12000));
+        const a = 0.9 + (0.2 - 0.9) * k;
+        this.fileTickerText.setAlpha(a);
+      }
+    }
   }
 }
 

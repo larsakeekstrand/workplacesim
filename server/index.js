@@ -2,7 +2,9 @@ import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  broadcastToolEvent,
   bufferDescription,
+  handleLifecycle,
   listActive,
   startAgent,
   stopAgent,
@@ -52,6 +54,16 @@ app.post("/hooks/subagent-stop", (req, res) => {
 
 app.post("/hooks/lab-visit", (req, res) => {
   visitRoom(req.body || {});
+  res.sendStatus(204);
+});
+
+app.post("/hooks/tool-event", (req, res) => {
+  broadcastToolEvent(req.body || {});
+  res.sendStatus(204);
+});
+
+app.post("/hooks/lifecycle", (req, res) => {
+  handleLifecycle(req.body || {});
   res.sendStatus(204);
 });
 
