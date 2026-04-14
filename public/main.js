@@ -278,6 +278,95 @@ const LAB_QUEUE_SPOTS = [
   { x: LAB_ROOM.x + LAB_ROOM.w - 32, y: LAB_ROOM.y + LAB_ROOM.h - 28 },
 ];
 
+// Corridor routing grid. Straight-line tweens cut through desks; sims must
+// hug these lanes instead. Constants are derived from the desk layout:
+// halls are just outside the desk x-range (cols span 152–728) and corridors
+// are just outside each row's y-range (rows at 180, 340, 500).
+const HALLWAY_LEFT_X = OPEN_ROOM.x + 34;
+const HALLWAY_RIGHT_X = OPEN_ROOM.x + OPEN_ROOM.w - 24;
+const NORTH_CORRIDOR_Y = OPEN_ROOM.y + 53;
+const CORRIDOR_YS = [
+  NORTH_CORRIDOR_Y,
+  DESK_ROWS[0] + APPROACH_OFFSET_Y,
+  DESK_ROWS[1] + APPROACH_OFFSET_Y,
+  DESK_ROWS[2] + APPROACH_OFFSET_Y,
+];
+
+function nearestCorridorY(y) {
+  let best = CORRIDOR_YS[0];
+  let bestD = Math.abs(y - best);
+  for (const cy of CORRIDOR_YS) {
+    const d = Math.abs(y - cy);
+    if (d < bestD) {
+      bestD = d;
+      best = cy;
+    }
+  }
+  return best;
+}
+
+function stagingForTarget(target) {
+  if (target.kind === "desk") return { x: HALLWAY_LEFT_X, y: target.desk.approachY };
+  if (target.kind === "queue") return { x: HALLWAY_RIGHT_X, y: nearestCorridorY(target.y) };
+  if (target.kind === "meeting" || target.kind === "meeting-queue") {
+    return { x: HALLWAY_RIGHT_X, y: nearestCorridorY(MEETING_DOOR.y) };
+  }
+  // lab / lab-queue
+  return { x: HALLWAY_RIGHT_X, y: nearestCorridorY(LAB_DOOR.y) };
+}
+
+function pathBetweenHallNodes(from, to) {
+  if (from.x === to.x && from.y === to.y) return [];
+  if (from.x === to.x) return [to];
+  // Cross-hall: the horizontal leg must be at a corridor y (not e.g. DOOR.y,
+  // which cuts through row 2). Snap first if needed.
+  const transitY = CORRIDOR_YS.includes(from.y) ? from.y : nearestCorridorY(from.y);
+  const out = [];
+  if (transitY !== from.y) out.push({ x: from.x, y: transitY });
+  if (transitY !== to.y || from.x !== to.x) out.push({ x: to.x, y: transitY });
+  if (transitY !== to.y) out.push(to);
+  return out;
+}
+
+function targetApproachWaypoints(target) {
+  if (target.kind === "desk") {
+    return [
+      { x: target.desk.approachX, y: target.desk.approachY },
+      { x: target.desk.seatX, y: target.desk.seatY },
+    ];
+  }
+  if (target.kind === "queue") return [{ x: target.x, y: target.y }];
+  if (target.kind === "meeting") {
+    return [
+      { x: HALLWAY_RIGHT_X, y: MEETING_DOOR.y },
+      { x: MEETING_ROOM.x + 24, y: MEETING_DOOR.y },
+      { x: target.seat.approachX, y: target.seat.approachY },
+      { x: target.seat.seatX, y: target.seat.seatY },
+    ];
+  }
+  if (target.kind === "meeting-queue") {
+    return [
+      { x: HALLWAY_RIGHT_X, y: MEETING_DOOR.y },
+      { x: MEETING_ROOM.x + 24, y: MEETING_DOOR.y },
+      { x: target.x, y: target.y },
+    ];
+  }
+  if (target.kind === "lab") {
+    return [
+      { x: HALLWAY_RIGHT_X, y: LAB_DOOR.y },
+      { x: LAB_ROOM.x + 24, y: LAB_DOOR.y },
+      { x: target.station.approachX, y: target.station.approachY },
+      { x: target.station.seatX, y: target.station.seatY },
+    ];
+  }
+  // lab-queue
+  return [
+    { x: HALLWAY_RIGHT_X, y: LAB_DOOR.y },
+    { x: LAB_ROOM.x + 24, y: LAB_DOOR.y },
+    { x: target.x, y: target.y },
+  ];
+}
+
 function findFreeDesk() {
   return desks.find((d) => !d.taken) || null;
 }
@@ -1226,7 +1315,7 @@ class RoomScene extends Phaser.Scene {
     this.stopMotion(sim);
     sim.target = newTarget;
     if (wasInMeeting && this.whiteboardText) this.refreshWhiteboard();
-    this.walkPath(sim, this.pathFromDoorTo(newTarget), () => {
+    this.walkPath(sim, this.computeRoute(sim, newTarget), () => {
       const seated =
         newTarget.kind === "desk" ||
         newTarget.kind === "meeting" ||
@@ -1369,44 +1458,79 @@ class RoomScene extends Phaser.Scene {
   }
 
   pathFromDoorTo(target) {
-    const insideOpenDoor = { x: OPEN_ROOM.x + 30, y: DOOR.y };
-    if (target.kind === "desk") {
-      return [
-        insideOpenDoor,
-        { x: target.desk.approachX, y: target.desk.approachY },
-        { x: target.desk.seatX, y: target.desk.seatY },
-      ];
+    const insideOpenDoor = { x: HALLWAY_LEFT_X, y: DOOR.y };
+    const staging = stagingForTarget(target);
+    return [
+      insideOpenDoor,
+      ...pathBetweenHallNodes(insideOpenDoor, staging),
+      ...targetApproachWaypoints(target),
+    ];
+  }
+
+  routeFromCurrentPosition(cx, cy) {
+    // Outside (west of the open room): enter via the west door.
+    if (cx < OPEN_ROOM.x) {
+      const handoff = { x: HALLWAY_LEFT_X, y: DOOR.y };
+      return {
+        prefix: [{ x: OPEN_ROOM.x + 2, y: DOOR.y }, handoff],
+        handoff,
+      };
     }
-    if (target.kind === "queue") {
-      return [insideOpenDoor, { x: target.x, y: target.y }];
+    // Inside meeting room: exit via meeting door, then snap to a corridor.
+    if (
+      cx >= MEETING_ROOM.x &&
+      cx <= MEETING_ROOM.x + MEETING_ROOM.w &&
+      cy >= MEETING_ROOM.y &&
+      cy <= MEETING_ROOM.y + MEETING_ROOM.h
+    ) {
+      const corrY = nearestCorridorY(MEETING_DOOR.y);
+      const handoff = { x: HALLWAY_RIGHT_X, y: corrY };
+      return {
+        prefix: [
+          { x: MEETING_ROOM.x + 24, y: MEETING_DOOR.y },
+          { x: HALLWAY_RIGHT_X, y: MEETING_DOOR.y },
+          handoff,
+        ],
+        handoff,
+      };
     }
-    if (target.kind === "meeting" || target.kind === "meeting-queue") {
-      const corridor = { x: OPEN_ROOM.x + OPEN_ROOM.w - 24, y: MEETING_DOOR.y };
-      const entry = { x: MEETING_ROOM.x + 24, y: MEETING_DOOR.y };
-      if (target.kind === "meeting") {
-        return [
-          insideOpenDoor,
-          corridor,
-          entry,
-          { x: target.seat.approachX, y: target.seat.approachY },
-          { x: target.seat.seatX, y: target.seat.seatY },
-        ];
-      }
-      return [insideOpenDoor, corridor, entry, { x: target.x, y: target.y }];
+    // Inside lab room: symmetrical.
+    if (
+      cx >= LAB_ROOM.x &&
+      cx <= LAB_ROOM.x + LAB_ROOM.w &&
+      cy >= LAB_ROOM.y &&
+      cy <= LAB_ROOM.y + LAB_ROOM.h
+    ) {
+      const corrY = nearestCorridorY(LAB_DOOR.y);
+      const handoff = { x: HALLWAY_RIGHT_X, y: corrY };
+      return {
+        prefix: [
+          { x: LAB_ROOM.x + 24, y: LAB_DOOR.y },
+          { x: HALLWAY_RIGHT_X, y: LAB_DOOR.y },
+          handoff,
+        ],
+        handoff,
+      };
     }
-    // lab / lab-queue
-    const corridor = { x: OPEN_ROOM.x + OPEN_ROOM.w - 24, y: LAB_DOOR.y };
-    const entry = { x: LAB_ROOM.x + 24, y: LAB_DOOR.y };
-    if (target.kind === "lab") {
-      return [
-        insideOpenDoor,
-        corridor,
-        entry,
-        { x: target.station.approachX, y: target.station.approachY },
-        { x: target.station.seatX, y: target.station.seatY },
-      ];
-    }
-    return [insideOpenDoor, corridor, entry, { x: target.x, y: target.y }];
+    // In the open room (at a desk seat, a queue spot, or walking): step south
+    // or north to the nearest corridor, then west to the left hall unless
+    // already close to the right hall.
+    const corrY = nearestCorridorY(cy);
+    const hallX = cx > HALLWAY_RIGHT_X - 20 ? HALLWAY_RIGHT_X : HALLWAY_LEFT_X;
+    const prefix = [];
+    if (Math.abs(cy - corrY) > 6) prefix.push({ x: cx, y: corrY });
+    if (Math.abs(cx - hallX) > 6) prefix.push({ x: hallX, y: corrY });
+    return { prefix, handoff: { x: hallX, y: corrY } };
+  }
+
+  computeRoute(sim, target) {
+    const { prefix, handoff } = this.routeFromCurrentPosition(sim.sprite.x, sim.sprite.y);
+    const staging = stagingForTarget(target);
+    return [
+      ...prefix,
+      ...pathBetweenHallNodes(handoff, staging),
+      ...targetApproachWaypoints(target),
+    ];
   }
 
   pathToDoorFrom(target) {
@@ -1417,7 +1541,7 @@ class RoomScene extends Phaser.Scene {
   }
 
   walkIn(sim) {
-    this.walkPath(sim, this.pathFromDoorTo(sim.target), () => {
+    this.walkPath(sim, this.computeRoute(sim, sim.target), () => {
       const seated =
         sim.target.kind === "desk" ||
         sim.target.kind === "meeting" ||
