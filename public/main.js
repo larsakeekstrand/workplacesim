@@ -150,6 +150,8 @@ const WINDOW_SPILL_PEAK_ALPHA = 0.22;
 const WINDOW_EVENT_WINDOW_MS = 10_000;
 const MOTE_LIFETIME_MS = 1200;
 const MOTE_CAP = 40;
+// rough pixel width per monospace char at the ticker font size
+const AVG_CHAR_WIDTH_PX = 5.2;
 const MOTE_COLORS = {
   Read: 0x7fc7ff,
   Grep: 0x7fc7ff,
@@ -432,7 +434,7 @@ class RoomScene extends Phaser.Scene {
     }
     const parts = this.fileTicker.map((e) => shortPath(e.path));
     // join and truncate to fit open-plan room width.
-    const maxChars = Math.floor((OPEN_ROOM.w - 20) / 5.2);
+    const maxChars = Math.floor((OPEN_ROOM.w - 20) / AVG_CHAR_WIDTH_PX);
     let text = parts.join(" · ");
     if (text.length > maxChars) text = text.slice(0, Math.max(0, maxChars - 1)) + "…";
     this.fileTickerText.setText(text);
@@ -1615,6 +1617,7 @@ class RoomScene extends Phaser.Scene {
         repeat: Math.max(1, Math.floor(duration / 280)),
         ease: "sine.inOut",
       });
+      sim.legsTween = legsTween;
 
       sim.walkTween = this.tweens.add({
         targets: sim.sprite,
@@ -1638,6 +1641,7 @@ class RoomScene extends Phaser.Scene {
         },
         onComplete: () => {
           legsTween.stop();
+          sim.legsTween = null;
           sim.sprite.legs.y = 12;
           step(i + 1);
         },
@@ -1649,6 +1653,7 @@ class RoomScene extends Phaser.Scene {
   destroySim(sim) {
     if (sim.bobTween) sim.bobTween.stop();
     if (sim.walkTween) sim.walkTween.stop();
+    if (sim.legsTween) sim.legsTween.stop();
     if (sim.haloG) {
       this.tweens.killTweensOf(sim.haloG);
       sim.haloG.destroy();

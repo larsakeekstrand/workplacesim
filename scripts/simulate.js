@@ -187,8 +187,9 @@ async function runAgent() {
   await post("/hooks/pretool", {
     tool_name: "Agent",
     session_id: sessionId,
-    tool_use_id: id("tu"),
+    tool_use_id: agentId,
     tool_input: { subagent_type: agentType, description },
+    cwd: `/Users/${user}/src/demo`,
     user,
     host,
     permission_mode: mode,
@@ -227,12 +228,31 @@ async function toolTick() {
   const agentId = randomAgentId();
   if (!agentId) return;
   const meta = activeAgents.get(agentId);
+  const toolName = pick(TOOL_NAMES);
   await post("/hooks/tool-event", {
     session_id: sessionId,
     agent_id: agentId,
-    tool_name: pick(TOOL_NAMES),
+    tool_name: toolName,
     permission_mode: meta ? meta.mode() : sessionMode,
   });
+  // ~4% chance a Bash-ish call fails — drives the red halo + `!` glyph on
+  // the main session sim via the tool-error lifecycle path.
+  if ((toolName === "Bash" || toolName === "WebFetch") && Math.random() < 0.04) {
+    await post("/hooks/lifecycle", {
+      kind: "tool-error",
+      session_id: sessionId,
+      agent_id: sessionId,
+      tool_name: toolName,
+      message: pick([
+        "exit status 1: command not found",
+        "non-zero exit (127)",
+        "fetch failed: ECONNREFUSED",
+      ]),
+      permission_mode: sessionMode,
+      user: sessionUser,
+      host: sessionHost,
+    });
+  }
 }
 
 async function lifecycleTick() {

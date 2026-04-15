@@ -120,6 +120,8 @@ export function stopAgent(raw) {
 
 function findRecord({ agent_id, session_id }) {
   let record = agent_id ? activeAgents.get(agent_id) : null;
+  // activeAgents is keyed by agent_id; for the main session sim agent_id === session_id,
+  // so this hits only for it. The loop below covers subagents (agent_id = tool_use_id).
   if (!record && session_id) record = activeAgents.get(session_id);
   if (!record && session_id) {
     for (const r of activeAgents.values()) {
@@ -148,7 +150,10 @@ export function broadcastToolEvent({ agent_id, session_id, tool_name, permission
   const id = agent_id || session_id;
   if (!id || !tool_name) return;
   const record = activeAgents.get(id);
-  if (!record) return;
+  if (!record) {
+    console.warn("broadcastToolEvent: no record for", { agent_id, session_id, tool_name });
+    return;
+  }
   checkPermissionMode(record, permission_mode);
   broadcast({ type: "tool", agent_id: id, tool_name, ts: Date.now() });
 }
