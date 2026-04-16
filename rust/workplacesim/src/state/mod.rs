@@ -23,7 +23,10 @@ pub mod pending;
 
 pub use agent::{Agent, CurrentError, Visit};
 pub use events::Event;
-pub use payloads::{BufferDescription, Lifecycle, StartAgent, StopAgent, ToolEvent, VisitRoom};
+pub use payloads::{
+    BufferDescription, Lifecycle, Pretool, PretoolToolInput, StartAgent, StopAgent, ToolEvent,
+    VisitRoom,
+};
 
 use pending::PendingDescription;
 
@@ -173,7 +176,7 @@ impl State {
         };
         self.active_agents.insert(p.agent_id, record.clone());
         self.emit(Event::Start {
-            agent: record.clone(),
+            agent: Box::new(record.clone()),
         });
         Some(record)
     }

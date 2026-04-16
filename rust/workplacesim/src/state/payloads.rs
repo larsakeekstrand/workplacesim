@@ -52,6 +52,23 @@ pub struct VisitRoom {
     pub permission_mode: Option<String>,
 }
 
+/// Shape of `PreToolUse` payloads. Only the `Agent` case is acted on; other
+/// tool names reach the endpoint but become no-ops.
+#[derive(Deserialize, Default, Debug, Clone)]
+pub struct Pretool {
+    pub session_id: Option<String>,
+    pub tool_name: Option<String>,
+    pub tool_use_id: Option<String>,
+    #[serde(default)]
+    pub tool_input: PretoolToolInput,
+}
+
+#[derive(Deserialize, Default, Debug, Clone)]
+pub struct PretoolToolInput {
+    pub subagent_type: Option<String>,
+    pub description: Option<String>,
+}
+
 #[derive(Deserialize, Default, Debug, Clone)]
 pub struct Lifecycle {
     pub kind: Option<String>,

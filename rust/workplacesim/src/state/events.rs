@@ -12,7 +12,9 @@ pub enum Event {
         agents: Vec<Agent>,
     },
     Start {
-        agent: Agent,
+        // Boxed to keep `Event` small — the other variants are <= 72 bytes,
+        // Agent is ~360.
+        agent: Box<Agent>,
     },
     Stop {
         agent_id: String,
