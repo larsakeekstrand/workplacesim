@@ -35,3 +35,7 @@ proptest = "1"
 [[bin]]
 name = "dump_bg"
 required-features = ["desktop"]
+
+[[bin]]
+name = "dump_sims"
+required-features = ["desktop"]

@@ -8,6 +8,8 @@ pub mod geometry;
 pub mod palette;
 pub mod routing;
 pub mod scene;
+pub mod sim_store;
+pub mod world;
 
 #[cfg(feature = "desktop")]
 pub mod desktop;

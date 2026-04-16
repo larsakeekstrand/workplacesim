@@ -96,6 +96,13 @@ impl State {
             .collect()
     }
 
+    /// Every record in the map, including ones with `finished_at.is_some()`
+    /// (still within the STOP_GRACE window). Used by the renderer so a sim can
+    /// animate its walk-out after SubagentStop/SessionEnd.
+    pub fn list_all_including_finished(&self) -> Vec<Agent> {
+        self.active_agents.values().cloned().collect()
+    }
+
     pub fn snapshot_event(&self) -> Event {
         Event::Snapshot {
             agents: self.list_active(),

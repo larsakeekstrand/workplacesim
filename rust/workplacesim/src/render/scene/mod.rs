@@ -8,6 +8,7 @@
 
 pub mod furniture;
 pub mod rooms;
+pub mod sim;
 
 use super::{palette, Framebuffer};
 

@@ -8,6 +8,9 @@ pub mod render;
 pub mod server;
 pub mod state;
 
+#[cfg(feature = "desktop")]
+pub use server::Shared;
+
 pub use state::{
     clock, new_state, Agent, BufferDescription, CurrentError, Event, Lifecycle, Pretool,
     PretoolToolInput, StartAgent, State, StopAgent, ToolEvent, Visit, VisitRoom,
