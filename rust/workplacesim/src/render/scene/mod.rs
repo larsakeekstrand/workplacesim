@@ -8,8 +8,10 @@
 
 pub mod effects;
 pub mod furniture;
+pub mod glyph;
 pub mod rooms;
 pub mod sim;
+pub mod text;
 
 // Paint order is: static bg → fx::draw_below (footsteps + tethers) → sims →
 // fx::draw_above (motes + halos). Mirrors `public/main.js`, where the shared
@@ -31,6 +33,12 @@ pub fn draw_static_background(fb: &mut impl Framebuffer) {
     furniture::draw_desks(fb);
     furniture::draw_meeting_room(fb);
     furniture::draw_lab_room(fb);
+}
+
+/// BUILD/OK panel text — separate from the rest of `draw_static_background` so
+/// it renders through embedded-graphics (concrete `RenderFrame` only).
+pub fn draw_static_text(fb: &mut super::RenderFrame) {
+    text::draw_build_board(fb);
 }
 
 /// Halve a JS world coordinate to the render-frame coordinate.

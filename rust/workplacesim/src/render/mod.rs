@@ -226,6 +226,37 @@ impl Framebuffer for RenderFrame {
     }
 }
 
+// embedded-graphics adapter. Lets text + sprite draws target `RenderFrame`
+// directly; draws routed through `set_pixel` so clipping + byte layout match
+// the rest of the scene code.
+use embedded_graphics::pixelcolor::Rgb888;
+use embedded_graphics::prelude::*;
+
+impl OriginDimensions for RenderFrame {
+    fn size(&self) -> Size {
+        Size::new(self.width, self.height)
+    }
+}
+
+impl DrawTarget for RenderFrame {
+    type Color = Rgb888;
+    type Error = core::convert::Infallible;
+
+    fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
+    where
+        I: IntoIterator<Item = Pixel<Self::Color>>,
+    {
+        for Pixel(point, color) in pixels {
+            self.set_pixel(
+                point.x,
+                point.y,
+                Rgb(color.r(), color.g(), color.b()),
+            );
+        }
+        Ok(())
+    }
+}
+
 /// Nearest-neighbour 2x upscale. Writes a 1280x720 (or generally `2*src_w` x
 /// `2*src_h`) ARGB buffer packed as `(0xff << 24) | (r << 16) | (g << 8) | b`
 /// — the encoding minifb expects.

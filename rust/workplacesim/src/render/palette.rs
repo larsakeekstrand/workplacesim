@@ -48,6 +48,21 @@ pub const SCOPE_TRACE: Rgb = rgb_from_hex(0x5cffaf);
 pub const LED: Rgb = rgb_from_hex(0x66ff88);
 pub const BUILD_BOARD_BG: Rgb = rgb_from_hex(0x10181c);
 
+// Step 6 text + readout palette.
+pub const WHITEBOARD_TEXT: Rgb = rgb_from_hex(0x1a1f28);
+pub const BUILD_BOARD_TEXT: Rgb = rgb_from_hex(0x66ff88);
+pub const TICKER_TEXT: Rgb = rgb_from_hex(0xcfe6ff);
+pub const STATUS_TEXT: Rgb = rgb_from_hex(0xd8d2c5);
+pub const STATUS_PANEL_BG: Rgb = rgb_from_hex(0x1c1510);
+pub const BENCH_FLASH_OK: Rgb = rgb_from_hex(0x6ef08e);
+pub const BENCH_FLASH_ERR: Rgb = rgb_from_hex(0xff6464);
+pub const GLYPH_ERR: Rgb = rgb_from_hex(0xff6464);
+pub const GLYPH_LAB: Rgb = rgb_from_hex(0x5cffaf);
+pub const GLYPH_IDLE: Rgb = rgb_from_hex(0x9dc9ff);
+pub const GLYPH_WALK: Rgb = rgb_from_hex(0xaaaaaa);
+pub const GLYPH_PLAN: Rgb = rgb_from_hex(0xeef2f6);
+pub const GLYPH_LONG: Rgb = rgb_from_hex(0xd2b48c);
+
 /// Fixed alpha for window light-spill trapezoids. Step 4a: no breathing — a
 /// single constant, roughly midway between WINDOW_SPILL_BASE_ALPHA (0.08) and
 /// WINDOW_SPILL_PEAK_ALPHA (0.22) from main.js. Step 6 ties this to the EMA.

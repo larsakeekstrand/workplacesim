@@ -10,6 +10,7 @@ use std::collections::VecDeque;
 
 use tokio::sync::broadcast::{self, error::TryRecvError};
 
+use super::geometry::LAB_STATION_XS;
 use super::palette::{self, Rgb};
 use super::sim_store::{SimState, SimStore};
 use crate::state::Event;
@@ -21,6 +22,11 @@ pub const MOTE_LIFETIME_MS: u64 = 1200;
 pub const MOTE_CAP: usize = 40;
 pub const TETHER_LIFETIME_MS: u64 = 2000;
 pub const HALO_LIFETIME_MS: u64 = 2000;
+
+// Step 6: file-touch ticker and bench-flash ring caps.
+pub const FILE_TICK_MS: u64 = 12_000;
+pub const FILE_TICK_CAP: usize = 3;
+pub const BENCH_FLASH_MS: u64 = 800;
 
 #[derive(Clone, Debug)]
 pub struct Footstep {
@@ -53,11 +59,26 @@ pub struct Halo {
     pub born_ms: u64,
 }
 
+#[derive(Clone, Debug)]
+pub struct FileTick {
+    pub path: String,
+    pub born_ms: u64,
+}
+
+#[derive(Clone, Debug)]
+pub struct BenchFlash {
+    pub station_idx: usize,
+    pub ok: bool,
+    pub born_ms: u64,
+}
+
 pub struct FxStore {
     pub footsteps: Vec<Footstep>,
     pub motes: VecDeque<Mote>,
     pub tethers: Vec<Tether>,
     pub halos: Vec<Halo>,
+    pub file_ticks: VecDeque<FileTick>,
+    pub bench_flashes: Vec<BenchFlash>,
 }
 
 impl Default for FxStore {
@@ -73,6 +94,8 @@ impl FxStore {
             motes: VecDeque::new(),
             tethers: Vec::new(),
             halos: Vec::new(),
+            file_ticks: VecDeque::new(),
+            bench_flashes: Vec::new(),
         }
     }
 
@@ -143,6 +166,36 @@ impl FxStore {
                     });
                 }
             }
+            Event::FileTouch { path, .. } => {
+                if path.is_empty() {
+                    return;
+                }
+                if self.file_ticks.len() >= FILE_TICK_CAP {
+                    self.file_ticks.pop_front();
+                }
+                self.file_ticks.push_back(FileTick {
+                    path: path.clone(),
+                    born_ms: now_ms,
+                });
+            }
+            Event::BashResult { agent_id, ok } => {
+                let Some(sim) = sim_store.anim.get(agent_id) else {
+                    return;
+                };
+                let idx = nearest_station_idx(sim.x);
+                if let Some(existing) =
+                    self.bench_flashes.iter_mut().find(|b| b.station_idx == idx)
+                {
+                    existing.ok = *ok;
+                    existing.born_ms = now_ms;
+                } else {
+                    self.bench_flashes.push(BenchFlash {
+                        station_idx: idx,
+                        ok: *ok,
+                        born_ms: now_ms,
+                    });
+                }
+            }
             _ => {}
         }
     }
@@ -187,7 +240,32 @@ impl FxStore {
             .retain(|t| now_ms.saturating_sub(t.born_ms) <= TETHER_LIFETIME_MS);
         self.halos
             .retain(|h| now_ms.saturating_sub(h.born_ms) <= HALO_LIFETIME_MS);
+        while let Some(front) = self.file_ticks.front() {
+            if now_ms.saturating_sub(front.born_ms) > FILE_TICK_MS {
+                self.file_ticks.pop_front();
+            } else {
+                break;
+            }
+        }
+        self.bench_flashes
+            .retain(|b| now_ms.saturating_sub(b.born_ms) <= BENCH_FLASH_MS);
     }
+}
+
+/// Pick the lab station (by JS-world x) closest to the given sim x. Sims that
+/// emit bash-result from the desk or meeting rooms still land somewhere — we
+/// want the nearest lab monitor to their body so the flash reads as "theirs".
+pub fn nearest_station_idx(sim_x: f32) -> usize {
+    let mut best = 0usize;
+    let mut best_d = f32::INFINITY;
+    for (i, &sx) in LAB_STATION_XS.iter().enumerate() {
+        let d = (sx as f32 - sim_x).abs();
+        if d < best_d {
+            best_d = d;
+            best = i;
+        }
+    }
+    best
 }
 
 #[cfg(test)]
@@ -216,6 +294,7 @@ mod tests {
                 bob_phase: 0.0,
                 spawned_at_ms: 0,
                 seated_at_ms: None,
+                seated_since_ms: None,
                 overflow_hash: 0,
                 last_footstep_ms: 0,
             },
@@ -384,6 +463,98 @@ mod tests {
         assert_eq!(fx.tethers.len(), 1);
         assert_eq!(fx.tethers[0].parent, "parent-sid");
         assert_eq!(fx.tethers[0].child, "child-1");
+    }
+
+    #[test]
+    fn file_tick_caps_at_three() {
+        let store = SimStore::new();
+        let (tx, mut rx) = broadcast::channel(16);
+        let mut fx = FxStore::new();
+        for i in 0..5 {
+            tx.send(Event::FileTouch {
+                agent_id: "a1".into(),
+                path: format!("src/f{i}.rs"),
+            })
+            .unwrap();
+        }
+        fx.drain_events(&mut rx, &store, 0);
+        assert_eq!(fx.file_ticks.len(), FILE_TICK_CAP);
+        // Oldest dropped; newest retained.
+        assert_eq!(fx.file_ticks.front().unwrap().path, "src/f2.rs");
+        assert_eq!(fx.file_ticks.back().unwrap().path, "src/f4.rs");
+    }
+
+    #[test]
+    fn file_tick_expires_at_ttl() {
+        let mut store = SimStore::new();
+        let (tx, mut rx) = broadcast::channel(4);
+        let mut fx = FxStore::new();
+        tx.send(Event::FileTouch {
+            agent_id: "a1".into(),
+            path: "src/x.rs".into(),
+        })
+        .unwrap();
+        fx.drain_events(&mut rx, &store, 0);
+        fx.tick(FILE_TICK_MS, &mut store);
+        assert_eq!(fx.file_ticks.len(), 1);
+        fx.tick(FILE_TICK_MS + 1, &mut store);
+        assert!(fx.file_ticks.is_empty());
+    }
+
+    #[test]
+    fn bench_flash_dedupes_by_station() {
+        let mut store = SimStore::new();
+        // Sim at lab station 1 (middle) — JS x = LAB_STATION_XS[1].
+        let mid_x = LAB_STATION_XS[1] as f32;
+        store.anim.insert(
+            "a1".into(),
+            SimAnim {
+                agent_id: "a1".into(),
+                session_id: None,
+                user: "u".into(),
+                permission_mode: "default".into(),
+                is_lab: true,
+                x: mid_x,
+                y: 400.0,
+                path: vec![],
+                seat: None,
+                room: Room::Lab,
+                state: SimState::Seated,
+                bob_phase: 0.0,
+                spawned_at_ms: 0,
+                seated_at_ms: Some(0),
+                seated_since_ms: Some(0),
+                overflow_hash: 0,
+                last_footstep_ms: 0,
+            },
+        );
+        let (tx, mut rx) = broadcast::channel(4);
+        let mut fx = FxStore::new();
+        tx.send(Event::BashResult {
+            agent_id: "a1".into(),
+            ok: true,
+        })
+        .unwrap();
+        fx.drain_events(&mut rx, &store, 100);
+        assert_eq!(fx.bench_flashes.len(), 1);
+        // Same station, different outcome: should refresh, not stack.
+        tx.send(Event::BashResult {
+            agent_id: "a1".into(),
+            ok: false,
+        })
+        .unwrap();
+        fx.drain_events(&mut rx, &store, 400);
+        assert_eq!(fx.bench_flashes.len(), 1);
+        assert!(!fx.bench_flashes[0].ok);
+        assert_eq!(fx.bench_flashes[0].born_ms, 400);
+    }
+
+    #[test]
+    fn bench_flash_nearest_station() {
+        // Left sim → station 0; right sim → station 2.
+        assert_eq!(nearest_station_idx(LAB_STATION_XS[0] as f32 - 5.0), 0);
+        assert_eq!(nearest_station_idx(LAB_STATION_XS[2] as f32 + 5.0), 2);
+        assert_eq!(nearest_station_idx(LAB_STATION_XS[1] as f32), 1);
     }
 
     #[test]

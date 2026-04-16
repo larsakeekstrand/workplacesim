@@ -538,15 +538,31 @@ mod linux_impl {
         let mut last_tick = Instant::now();
         let frame_budget = Duration::from_millis(1000 / TARGET_FPS);
         let mut first_frame = true;
+        let started_at_ms = clock::now_ms();
+        let mut idle_since_ms: Option<u64> = None;
+        let mut last_session_ended_ms: Option<u64> = None;
 
         while !shutdown.load(Ordering::Relaxed) {
             let t0 = Instant::now();
             let now_ms = clock::now_ms();
 
-            let world = {
+            let (world, agents) = {
                 let s = state.read();
-                RenderWorld::from_state(&s, now_ms)
+                (RenderWorld::from_state(&s, now_ms), s.list_active())
             };
+            for a in &agents {
+                if a.agent_type == "claude" {
+                    if let Some(fa) = a.finished_at {
+                        last_session_ended_ms =
+                            Some(last_session_ended_ms.unwrap_or(0).max(fa));
+                    }
+                }
+            }
+            if agents.is_empty() {
+                idle_since_ms.get_or_insert(now_ms);
+            } else {
+                idle_since_ms = None;
+            }
             {
                 let mut s = state.write();
                 s.tick(now_ms);
@@ -564,9 +580,25 @@ mod linux_impl {
             // scaled bytes to the fb mmap every frame).
             frame.clear(palette::BG);
             scene::draw_static_background(&mut frame);
+            scene::draw_static_text(&mut frame);
             scene::effects::draw_below(&mut frame, &fx, &store, now_ms);
             scene::sim::draw_sims(&mut frame, &store);
+            let agent_refs: Vec<&crate::state::Agent> = agents.iter().collect();
+            scene::glyph::draw_glyphs(&mut frame, &store, &agent_refs, &fx, now_ms);
             scene::effects::draw_above(&mut frame, &fx, &store, now_ms);
+            scene::text::draw_whiteboard(&mut frame, &store, &agent_refs);
+            scene::text::draw_file_ticker(&mut frame, &fx, now_ms);
+            scene::text::draw_bench_flashes(&mut frame, &fx, now_ms);
+            if let Some(since) = idle_since_ms {
+                if now_ms.saturating_sub(since) > 2_000 {
+                    scene::text::draw_status_readout(
+                        &mut frame,
+                        now_ms,
+                        started_at_ms,
+                        last_session_ended_ms,
+                    );
+                }
+            }
 
             // First frame: full-frame blit so the static background appears.
             // Subsequent frames: only the dynamic AABBs + last-frame AABBs

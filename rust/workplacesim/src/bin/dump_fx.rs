@@ -1,8 +1,6 @@
 //! Seed a sims+effects scene, render one frame, write a PNG. Mirrors the
 //! step 4d verification harness; not part of the shipped binary.
 
-use std::collections::VecDeque;
-
 use workplacesim::render::classify::{classify, Room};
 use workplacesim::render::fx_store::{Footstep, FxStore, Halo, Mote, Tether};
 use workplacesim::render::geometry::Point;
@@ -40,6 +38,11 @@ fn seed_sim(
         bob_phase: 0.0,
         spawned_at_ms: 0,
         seated_at_ms: if matches!(state, SimState::Seated) {
+            Some(0)
+        } else {
+            None
+        },
+        seated_since_ms: if matches!(state, SimState::Seated) {
             Some(0)
         } else {
             None
@@ -96,12 +99,7 @@ fn main() -> anyhow::Result<()> {
     // one mote per walker, a tether between A (parent) and B (child),
     // an error halo around the seated lab sim.
     let now_ms = 1_000;
-    let mut fx = FxStore {
-        footsteps: Vec::new(),
-        motes: VecDeque::new(),
-        tethers: Vec::new(),
-        halos: Vec::new(),
-    };
+    let mut fx = FxStore::new();
 
     for (offset_ms, dx) in [(0, 0), (120, -22), (240, -44), (360, -66)] {
         let shirt_a = palette::sim_colors("alice").shirt;

@@ -245,6 +245,7 @@ mod tests {
             bob_phase: 0.0,
             spawned_at_ms: 0,
             seated_at_ms: None,
+            seated_since_ms: None,
             overflow_hash: 0,
             last_footstep_ms: 0,
         }

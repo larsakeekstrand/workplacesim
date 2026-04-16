@@ -17,6 +17,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 anyhow = "1"
 ahash = "0.8"
 parking_lot = "0.12"
+embedded-graphics = "0.8"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 minifb = { version = "0.27", optional = true }
 image = { version = "0.25", default-features = false, features = ["png"], optional = true }
 
@@ -54,4 +56,8 @@ required-features = ["desktop"]
 
 [[bin]]
 name = "dump_fx"
+required-features = ["desktop"]
+
+[[bin]]
+name = "dump_text"
 required-features = ["desktop"]

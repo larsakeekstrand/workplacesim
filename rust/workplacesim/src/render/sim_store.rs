@@ -142,6 +142,10 @@ pub struct SimAnim {
     pub bob_phase: f32,
     pub spawned_at_ms: u64,
     pub seated_at_ms: Option<u64>,
+    /// Set when the sim *transitions* to Seated; cleared on transition out.
+    /// Distinct from `seated_at_ms` (which is recorded once at first seating
+    /// and we keep for external inspection): this one drives the `Z` glyph.
+    pub seated_since_ms: Option<u64>,
     /// For overflow queue-spot selection when seats are full.
     pub overflow_hash: u32,
     /// Last frame ms at which a footstep was dropped for this sim. Owned here
@@ -211,6 +215,7 @@ impl SimStore {
                 bob_phase: 0.0,
                 spawned_at_ms: a.started_at,
                 seated_at_ms: None,
+                seated_since_ms: None,
                 overflow_hash,
                 last_footstep_ms: 0,
             };
@@ -238,6 +243,7 @@ impl SimStore {
             if let Some(sim) = self.anim.get_mut(&id) {
                 sim.seat = None;
                 sim.state = SimState::WalkingOut;
+                sim.seated_since_ms = None;
                 // Synthesise a walk-out from the sim's current position. The
                 // simplest faithful port: snap to the sim's last seat target
                 // and use `path_to_door_from`. We reconstruct a Target from
@@ -272,8 +278,12 @@ impl SimStore {
                             SimState::WalkingIn => {
                                 sim.state = SimState::Seated;
                                 sim.seated_at_ms = Some(now_ms);
+                                sim.seated_since_ms = Some(now_ms);
                             }
-                            SimState::WalkingOut => sim.state = SimState::Gone,
+                            SimState::WalkingOut => {
+                                sim.state = SimState::Gone;
+                                sim.seated_since_ms = None;
+                            }
                             _ => {}
                         }
                     }
@@ -406,6 +416,7 @@ mod tests {
             bob_phase: 0.0,
             spawned_at_ms: 0,
             seated_at_ms: None,
+            seated_since_ms: None,
             overflow_hash: 0,
             last_footstep_ms: 0,
         };
@@ -441,6 +452,7 @@ mod tests {
             bob_phase: 0.0,
             spawned_at_ms: 0,
             seated_at_ms: None,
+            seated_since_ms: None,
             overflow_hash: 0,
             last_footstep_ms: 0,
         };
@@ -452,6 +464,22 @@ mod tests {
         assert_eq!(sim.x, 10.0);
         assert_eq!(sim.y, 0.0);
         assert_eq!(sim.seated_at_ms, Some(500));
+        assert_eq!(sim.seated_since_ms, Some(500));
+    }
+
+    #[test]
+    fn reconcile_clears_seated_since_on_walk_out() {
+        let mut store = SimStore::new();
+        let a0 = agent("a1", "alice", "coder", "default", 0, None);
+        store.reconcile(&world(vec![a0], 0));
+        // Manually mark seated (skip tick) so seated_since_ms is populated.
+        let sim = store.anim.get_mut("a1").unwrap();
+        sim.state = SimState::Seated;
+        sim.seated_since_ms = Some(500);
+        let finished = agent("a1", "alice", "coder", "default", 0, Some(1_000));
+        store.reconcile(&world(vec![finished], 1_000));
+        assert_eq!(store.anim["a1"].state, SimState::WalkingOut);
+        assert_eq!(store.anim["a1"].seated_since_ms, None);
     }
 
     #[test]
@@ -509,6 +537,7 @@ mod tests {
             bob_phase: 0.0,
             spawned_at_ms: 0,
             seated_at_ms: Some(0),
+            seated_since_ms: Some(0),
             overflow_hash: 0,
             last_footstep_ms: 0,
         };

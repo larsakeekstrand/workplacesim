@@ -41,6 +41,11 @@ fn seed_sim(
         } else {
             None
         },
+        seated_since_ms: if matches!(state, SimState::Seated) {
+            Some(0)
+        } else {
+            None
+        },
         overflow_hash,
         last_footstep_ms: 0,
     };
