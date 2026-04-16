@@ -39,3 +39,7 @@ required-features = ["desktop"]
 [[bin]]
 name = "dump_sims"
 required-features = ["desktop"]
+
+[[bin]]
+name = "dump_fx"
+required-features = ["desktop"]

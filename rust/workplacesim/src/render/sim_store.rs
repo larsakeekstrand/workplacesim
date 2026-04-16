@@ -127,6 +127,7 @@ pub enum SimState {
 #[derive(Clone, Debug)]
 pub struct SimAnim {
     pub agent_id: String,
+    pub session_id: Option<String>,
     pub user: String,
     /// "plan" / "test" / "default" — used by body-part drawing for the badge.
     pub permission_mode: String,
@@ -143,6 +144,9 @@ pub struct SimAnim {
     pub seated_at_ms: Option<u64>,
     /// For overflow queue-spot selection when seats are full.
     pub overflow_hash: u32,
+    /// Last frame ms at which a footstep was dropped for this sim. Owned here
+    /// so FxStore stays a pure ring-buffer with no per-sim shadow state.
+    pub last_footstep_ms: u64,
 }
 
 impl SimAnim {
@@ -194,6 +198,7 @@ impl SimStore {
 
             let sim = SimAnim {
                 agent_id: a.agent_id.clone(),
+                session_id: a.session_id.clone(),
                 user: a.user.clone(),
                 permission_mode: a.permission_mode.clone(),
                 is_lab: matches!(room, Room::Lab),
@@ -207,6 +212,7 @@ impl SimStore {
                 spawned_at_ms: a.started_at,
                 seated_at_ms: None,
                 overflow_hash,
+                last_footstep_ms: 0,
             };
             self.anim.insert(a.agent_id.clone(), sim);
         }
@@ -333,6 +339,7 @@ mod tests {
     ) -> AgentView {
         AgentView {
             agent_id: id.into(),
+            session_id: None,
             user: user.into(),
             agent_type: agent_type.into(),
             description: String::new(),
@@ -386,6 +393,7 @@ mod tests {
         // Hand-seed — skip reconcile so we control the path exactly.
         let mut sim = SimAnim {
             agent_id: "t".into(),
+            session_id: None,
             user: "t".into(),
             permission_mode: "default".into(),
             is_lab: false,
@@ -399,6 +407,7 @@ mod tests {
             spawned_at_ms: 0,
             seated_at_ms: None,
             overflow_hash: 0,
+            last_footstep_ms: 0,
         };
         sim.path.reserve(0);
         store.anim.insert("t".into(), sim);
@@ -419,6 +428,7 @@ mod tests {
         let mut store = SimStore::new();
         let sim = SimAnim {
             agent_id: "t".into(),
+            session_id: None,
             user: "t".into(),
             permission_mode: "default".into(),
             is_lab: false,
@@ -432,6 +442,7 @@ mod tests {
             spawned_at_ms: 0,
             seated_at_ms: None,
             overflow_hash: 0,
+            last_footstep_ms: 0,
         };
         store.anim.insert("t".into(), sim);
         // 10 px at 55 px/s => ~182 ms. Tick 500 ms to be safe.
@@ -485,6 +496,7 @@ mod tests {
         let mut store = SimStore::new();
         let sim = SimAnim {
             agent_id: "t".into(),
+            session_id: None,
             user: "t".into(),
             permission_mode: "default".into(),
             is_lab: false,
@@ -498,6 +510,7 @@ mod tests {
             spawned_at_ms: 0,
             seated_at_ms: Some(0),
             overflow_hash: 0,
+            last_footstep_ms: 0,
         };
         store.anim.insert("t".into(), sim);
         store.tick(900, 900);

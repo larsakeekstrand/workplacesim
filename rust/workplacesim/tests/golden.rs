@@ -1,15 +1,19 @@
 //! Golden-frame regression for the static scene background. Guards against
 //! accidental drift in the procedural-pixel-art port of public/main.js.
 
+use std::collections::VecDeque;
+
 use workplacesim::render::classify::{classify, Room};
+use workplacesim::render::fx_store::{Footstep, FxStore, Halo, Mote, Tether};
 use workplacesim::render::geometry::{lab_stations, Point};
-use workplacesim::render::palette::hash_str;
+use workplacesim::render::palette::{self, hash_str};
 use workplacesim::render::sim_store::{SimAnim, SimState, SimStore};
 use workplacesim::render::{scene, RenderFrame, RENDER_H, RENDER_W};
 
 const GOLDEN_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden/static-bg.raw");
 const GOLDEN_SIMS_PATH: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden/three-sims.raw");
+const GOLDEN_FX_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden/fx-scene.raw");
 
 #[test]
 fn static_background_matches_golden() {
@@ -59,6 +63,7 @@ fn seed_three_sims(store: &mut SimStore) {
         "mid-walk-desk".into(),
         SimAnim {
             agent_id: "mid-walk-desk".into(),
+            session_id: None,
             user: "alice".into(),
             permission_mode: "default".into(),
             is_lab: matches!(room_a, Room::Lab),
@@ -72,6 +77,7 @@ fn seed_three_sims(store: &mut SimStore) {
             spawned_at_ms: 0,
             seated_at_ms: None,
             overflow_hash: hash_str("mid-walk-desk"),
+            last_footstep_ms: 0,
         },
     );
 
@@ -82,6 +88,7 @@ fn seed_three_sims(store: &mut SimStore) {
         "mid-walk-meeting".into(),
         SimAnim {
             agent_id: "mid-walk-meeting".into(),
+            session_id: None,
             user: "carol".into(),
             permission_mode: "plan".into(),
             is_lab: matches!(room_b, Room::Lab),
@@ -101,6 +108,7 @@ fn seed_three_sims(store: &mut SimStore) {
             spawned_at_ms: 0,
             seated_at_ms: None,
             overflow_hash: hash_str("mid-walk-meeting"),
+            last_footstep_ms: 0,
         },
     );
 
@@ -112,6 +120,7 @@ fn seed_three_sims(store: &mut SimStore) {
         "seated-lab".into(),
         SimAnim {
             agent_id: "seated-lab".into(),
+            session_id: None,
             user: "bob".into(),
             permission_mode: "default".into(),
             is_lab: matches!(room_c, Room::Lab),
@@ -125,6 +134,7 @@ fn seed_three_sims(store: &mut SimStore) {
             spawned_at_ms: 0,
             seated_at_ms: Some(0),
             overflow_hash: hash_str("seated-lab"),
+            last_footstep_ms: 0,
         },
     );
 }
@@ -165,6 +175,106 @@ fn three_sims_matches_golden() {
                 let y = px as u32 / RENDER_W;
                 panic!(
                     "three-sims drift at pixel ({x},{y}) byte {i}: actual={a} expected={e}. run with REGEN=1 to update."
+                );
+            }
+        }
+        unreachable!("lengths equal but contents differ")
+    }
+}
+
+fn seed_fx_scene(store: &mut SimStore) -> FxStore {
+    seed_three_sims(store);
+    let now_ms: u64 = 1_000;
+    let mut fx = FxStore {
+        footsteps: Vec::new(),
+        motes: VecDeque::new(),
+        tethers: Vec::new(),
+        halos: Vec::new(),
+    };
+    // Footstep trail behind walker A and walker B (born at staggered times so
+    // each step lands at a distinct alpha in the 0.25 → 0 envelope).
+    let shirt_a = palette::sim_colors("alice").shirt;
+    let shirt_b = palette::sim_colors("carol").shirt;
+    for (i, dx) in [0i32, -22, -44, -66].iter().enumerate() {
+        let born = now_ms.saturating_sub(200 + (i as u64) * 200);
+        fx.footsteps.push(Footstep {
+            agent_id: "mid-walk-desk".into(),
+            x: 300.0 + *dx as f32,
+            y: 256.0 + 10.0,
+            color: shirt_a,
+            born_ms: born,
+        });
+        fx.footsteps.push(Footstep {
+            agent_id: "mid-walk-meeting".into(),
+            x: 500.0 + *dx as f32,
+            y: 256.0 + 10.0,
+            color: shirt_b,
+            born_ms: born,
+        });
+    }
+    fx.motes.push_back(Mote {
+        agent_id: "mid-walk-desk".into(),
+        x: 300.0,
+        y: 256.0 - 18.0,
+        color: palette::mote_color("Read"),
+        born_ms: now_ms - 200,
+    });
+    fx.motes.push_back(Mote {
+        agent_id: "mid-walk-meeting".into(),
+        x: 500.0,
+        y: 256.0 - 18.0,
+        color: palette::mote_color("Bash"),
+        born_ms: now_ms - 400,
+    });
+    fx.tethers.push(Tether {
+        parent: "mid-walk-desk".into(),
+        child: "mid-walk-meeting".into(),
+        born_ms: now_ms - 300,
+    });
+    fx.halos.push(Halo {
+        agent_id: "seated-lab".into(),
+        born_ms: now_ms - 600,
+    });
+    fx
+}
+
+#[test]
+fn fx_scene_matches_golden() {
+    let mut store = SimStore::new();
+    let fx = seed_fx_scene(&mut store);
+    let now_ms: u64 = 1_000;
+
+    let mut frame = RenderFrame::new(RENDER_W, RENDER_H);
+    scene::draw_static_background(&mut frame);
+    scene::effects::draw_below(&mut frame, &fx, &store, now_ms);
+    scene::sim::draw_sims(&mut frame, &store);
+    scene::effects::draw_above(&mut frame, &fx, &store, now_ms);
+    let actual: Vec<u8> = frame.rgb_bytes().to_vec();
+
+    if std::env::var_os("REGEN").is_some() {
+        std::fs::write(GOLDEN_FX_PATH, &actual).expect("write golden");
+        eprintln!("wrote {GOLDEN_FX_PATH} ({} bytes)", actual.len());
+        return;
+    }
+
+    let expected = std::fs::read(GOLDEN_FX_PATH).unwrap_or_else(|e| {
+        panic!("golden file missing: {GOLDEN_FX_PATH} ({e}). run with REGEN=1 to create.")
+    });
+    assert_eq!(
+        actual.len(),
+        expected.len(),
+        "fx-scene size drift ({} vs {})",
+        actual.len(),
+        expected.len()
+    );
+    if actual != expected {
+        for (i, (a, e)) in actual.iter().zip(expected.iter()).enumerate() {
+            if a != e {
+                let px = i / 3;
+                let x = px as u32 % RENDER_W;
+                let y = px as u32 / RENDER_W;
+                panic!(
+                    "fx-scene drift at pixel ({x},{y}) byte {i}: actual={a} expected={e}. run with REGEN=1 to update."
                 );
             }
         }

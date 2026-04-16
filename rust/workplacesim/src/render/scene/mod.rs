@@ -6,9 +6,17 @@
 //! `Rect::half()`). Layout constants stay in their JS-native values so the
 //! geometry port stays byte-for-byte comparable with `public/main.js`.
 
+pub mod effects;
 pub mod furniture;
 pub mod rooms;
 pub mod sim;
+
+// Paint order is: static bg → fx::draw_below (footsteps + tethers) → sims →
+// fx::draw_above (motes + halos). Mirrors `public/main.js`, where the shared
+// `effects` Graphics layer renders trails and tethers below sim sprites while
+// motes and halos are independent display objects placed above. Keeping motes
+// on top makes them legible against bodies; tethers under bodies prevents the
+// dashed line from striping the parent's silhouette.
 
 use super::{palette, Framebuffer};
 

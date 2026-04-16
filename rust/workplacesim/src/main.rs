@@ -101,9 +101,9 @@ fn main() -> anyhow::Result<()> {
     bootstrap_logging();
     let addr = bind_addr();
 
-    let (state, _rx) = workplacesim::state::new_state();
-    // TODO(step 7): wire broadcast receiver to SSE clients; until then, hold
-    // `_rx` so broadcast::Sender::send never fails for "no receivers".
+    let (state, rx) = workplacesim::state::new_state();
+    // The render thread now owns this receiver. SSE (step 7) will subscribe
+    // separately via `State::subscribe()`.
 
     if let Some(n) = parse_demo_count() {
         seed_demo_agents(&state, n);
@@ -123,7 +123,7 @@ fn main() -> anyhow::Result<()> {
         })
     });
 
-    workplacesim::render::desktop::run_desktop(state)?;
+    workplacesim::render::desktop::run_desktop(state, rx)?;
     // Window closed → drop the server thread along with the process. Step 4a
     // accepts the abrupt shutdown; step 7 will wire a proper cancellation
     // channel.

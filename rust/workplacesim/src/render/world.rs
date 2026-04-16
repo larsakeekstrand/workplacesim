@@ -15,6 +15,7 @@ use crate::state::{Agent, State};
 #[derive(Clone, Debug)]
 pub struct AgentView {
     pub agent_id: String,
+    pub session_id: Option<String>,
     pub user: String,
     pub agent_type: String,
     pub description: String,
@@ -27,6 +28,7 @@ impl From<&Agent> for AgentView {
     fn from(a: &Agent) -> Self {
         Self {
             agent_id: a.agent_id.clone(),
+            session_id: a.session_id.clone(),
             user: a.user.clone(),
             agent_type: a.agent_type.clone(),
             description: a.description.clone(),

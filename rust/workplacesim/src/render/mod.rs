@@ -4,6 +4,7 @@
 //! headless `RenderFrame` — or the minifb desktop window — draw the same world.
 
 pub mod classify;
+pub mod fx_store;
 pub mod geometry;
 pub mod palette;
 pub mod routing;
