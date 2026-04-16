@@ -4,6 +4,7 @@
 //! `server/index.js`'s endpoint surface 1:1. SSE and static serving are
 //! deferred to step 7.
 
+pub mod render;
 pub mod server;
 pub mod state;
 

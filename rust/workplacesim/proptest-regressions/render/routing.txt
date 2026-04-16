@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 654ca99b9ec3d172bc19695045c79c4d14ebec94b49178c541b56299bd805680 # shrinks to fx = 0, fy = 0, target = Meeting(MeetingSeat { x: 944, y: 163, seat_x: 944, seat_y: 155, approach_x: 944, approach_y: 127, side: North })
+cc 389ebe44234b396a9f489e201409cd59e6d0b6e761f6cd1b12a0a05c72af3aa8 # shrinks to fx = 0, fy = 0, target = Queue(Point { x: 130, y: 0 })

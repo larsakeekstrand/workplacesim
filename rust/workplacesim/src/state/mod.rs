@@ -15,7 +15,6 @@ use indexmap::IndexMap;
 use tokio::sync::{broadcast, RwLock};
 
 pub mod agent;
-pub mod classify;
 pub mod clock;
 pub mod events;
 pub mod payloads;
