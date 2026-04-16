@@ -22,7 +22,7 @@ pub async fn pretool(
     // `subagent_type`, so we don't duplicate that check here.
     if body.tool_name.as_deref() == Some("Agent") {
         let now = clock::now_ms();
-        let mut guard = state.write().await;
+        let mut guard = state.write();
         guard.buffer_description(
             BufferDescription {
                 session_id: body.session_id,
@@ -41,7 +41,7 @@ pub async fn subagent_start(
     Json(body): Json<StartAgent>,
 ) -> StatusCode {
     let now = clock::now_ms();
-    let mut guard = state.write().await;
+    let mut guard = state.write();
     guard.start_agent(body, now);
     StatusCode::NO_CONTENT
 }
@@ -51,7 +51,7 @@ pub async fn subagent_stop(
     Json(body): Json<StopAgent>,
 ) -> StatusCode {
     let now = clock::now_ms();
-    let mut guard = state.write().await;
+    let mut guard = state.write();
     guard.stop_agent(body, now);
     StatusCode::NO_CONTENT
 }
@@ -61,7 +61,7 @@ pub async fn lab_visit(
     Json(body): Json<VisitRoom>,
 ) -> StatusCode {
     let now = clock::now_ms();
-    let mut guard = state.write().await;
+    let mut guard = state.write();
     guard.visit_room(body, now);
     StatusCode::NO_CONTENT
 }
@@ -71,7 +71,7 @@ pub async fn tool_event(
     Json(body): Json<ToolEvent>,
 ) -> StatusCode {
     let now = clock::now_ms();
-    let mut guard = state.write().await;
+    let mut guard = state.write();
     guard.tool_event(body, now);
     StatusCode::NO_CONTENT
 }
@@ -81,12 +81,12 @@ pub async fn lifecycle(
     Json(body): Json<Lifecycle>,
 ) -> StatusCode {
     let now = clock::now_ms();
-    let mut guard = state.write().await;
+    let mut guard = state.write();
     guard.handle_lifecycle(body, now);
     StatusCode::NO_CONTENT
 }
 
 pub async fn list_agents(AxumState(state): AxumState<Shared>) -> Json<Value> {
-    let guard = state.read().await;
+    let guard = state.read();
     Json(json!({ "agents": guard.list_active() }))
 }

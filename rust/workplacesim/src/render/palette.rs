@@ -15,6 +15,44 @@ const fn rgb_from_hex(hex: u32) -> Rgb {
 
 pub const MOTE_DEFAULT_COLOR: Rgb = rgb_from_hex(0xcccccc);
 
+// --- Scene palette. 1:1 with the PALETTE object in public/main.js. ---
+pub const BG: Rgb = rgb_from_hex(0x0b0d12);
+pub const FLOOR_A: Rgb = rgb_from_hex(0x3a2f24);
+pub const FLOOR_B: Rgb = rgb_from_hex(0x433627);
+pub const FLOOR_MEETING_A: Rgb = rgb_from_hex(0x2c2f3a);
+pub const FLOOR_MEETING_B: Rgb = rgb_from_hex(0x353948);
+pub const FLOOR_LAB_A: Rgb = rgb_from_hex(0x1f3038);
+pub const FLOOR_LAB_B: Rgb = rgb_from_hex(0x263a44);
+pub const FLOOR_LINE: Rgb = rgb_from_hex(0x2a2218);
+pub const LAB_GRID: Rgb = rgb_from_hex(0x0e1c22);
+pub const WALL: Rgb = rgb_from_hex(0x1a2028);
+pub const WALL_HI: Rgb = rgb_from_hex(0x2d3643);
+pub const DESK_TOP: Rgb = rgb_from_hex(0x8a6a3f);
+pub const DESK_EDGE: Rgb = rgb_from_hex(0x5c4526);
+pub const DESK_SHADE: Rgb = rgb_from_hex(0x6e5432);
+pub const MONITOR: Rgb = rgb_from_hex(0x0f1722);
+pub const MONITOR_GLOW: Rgb = rgb_from_hex(0x6ec6ff);
+pub const KEYBOARD: Rgb = rgb_from_hex(0x1c232d);
+pub const MOUSE: Rgb = rgb_from_hex(0x2a2f39);
+pub const CHAIR: Rgb = rgb_from_hex(0x2b333d);
+pub const CHAIR_HI: Rgb = rgb_from_hex(0x3e4856);
+pub const WHITEBOARD_FRAME: Rgb = rgb_from_hex(0xa0a8b4);
+pub const WHITEBOARD_BODY: Rgb = rgb_from_hex(0xf2f2ee);
+pub const WINDOW_FRAME: Rgb = rgb_from_hex(0x3d4956);
+pub const WINDOW_GLASS: Rgb = rgb_from_hex(0x7ab5d6);
+pub const BENCH_TOP: Rgb = rgb_from_hex(0xc8cdd5);
+pub const BENCH_SHADE: Rgb = rgb_from_hex(0x6f7682);
+pub const BENCH_EDGE: Rgb = rgb_from_hex(0x4e535c);
+pub const SCOPE: Rgb = rgb_from_hex(0x0a131a);
+pub const SCOPE_TRACE: Rgb = rgb_from_hex(0x5cffaf);
+pub const LED: Rgb = rgb_from_hex(0x66ff88);
+pub const BUILD_BOARD_BG: Rgb = rgb_from_hex(0x10181c);
+
+/// Fixed alpha for window light-spill trapezoids. Step 4a: no breathing — a
+/// single constant, roughly midway between WINDOW_SPILL_BASE_ALPHA (0.08) and
+/// WINDOW_SPILL_PEAK_ALPHA (0.22) from main.js. Step 6 ties this to the EMA.
+pub const WINDOW_SPILL_ALPHA: f32 = 0.18;
+
 /// Tool-name → colour table. The JS object lookup is exact-match, but for
 /// prefixed tool names (e.g. `NotebookEdit`) the JS table explicitly enumerates
 /// each alias. We mirror that table here and match exactly; there is no real

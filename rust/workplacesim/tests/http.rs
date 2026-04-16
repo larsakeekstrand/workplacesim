@@ -51,7 +51,7 @@ async fn pretool_agent_buffers_description_consumed_by_start() {
     assert_eq!(resp.status(), StatusCode::NO_CONTENT);
     assert!(drain(&mut rx).is_empty(), "buffering does not emit");
     {
-        let guard = state.read().await;
+        let guard = state.read();
         assert_eq!(guard.list_active().len(), 0);
     }
 
@@ -95,7 +95,7 @@ async fn pretool_non_agent_tool_is_noop() {
     assert_eq!(resp.status(), StatusCode::NO_CONTENT);
     assert!(drain(&mut rx).is_empty());
 
-    let guard = state.read().await;
+    let guard = state.read();
     assert_eq!(guard.list_active().len(), 0);
     // No pending description buffered either — buffer_description requires
     // subagent_type, so a Bash payload with no subagent_type wouldn't buffer
@@ -193,7 +193,7 @@ async fn subagent_stop_fifo_fallback() {
     assert!(matches!(&events[0], Event::Stop { agent_id } if agent_id == "tu-1"));
 
     // tu-2 still listed.
-    let guard = state.read().await;
+    let guard = state.read();
     let active = guard.list_active();
     assert_eq!(active.len(), 1);
     assert_eq!(active[0].agent_id, "tu-2");
@@ -352,7 +352,7 @@ async fn lifecycle_tool_error_stores_current_error_and_emits() {
     }
 
     // current_error stashed on the record too.
-    let guard = state.read().await;
+    let guard = state.read();
     let agent = guard.list_active().into_iter().next().unwrap();
     let err = agent.current_error.unwrap();
     assert_eq!(err.tool_name, "Bash");

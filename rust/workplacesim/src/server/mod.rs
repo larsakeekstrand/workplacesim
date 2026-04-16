@@ -10,7 +10,7 @@ use std::sync::Arc;
 use axum::http::{header, Method};
 use axum::routing::{get, post};
 use axum::Router;
-use tokio::sync::RwLock;
+use parking_lot::RwLock;
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::state::State;

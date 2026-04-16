@@ -1,9 +1,12 @@
 //! In-memory state machine. Ports `server/state.js` event-for-event.
 //!
 //! The JS module mutated module-level globals; here we own everything in
-//! `State` behind `Arc<RwLock<_>>`. Broadcast is a tokio `broadcast` channel:
-//! step 2's SSE route will simply subscribe and re-encode each `Event` as
-//! `data: <json>\n\n`.
+//! `State` behind `Arc<parking_lot::RwLock<_>>`. The render thread runs in a
+//! sync context (minifb's event loop is blocking), so a tokio RwLock would
+//! force us to carry a runtime into the renderer — parking_lot keeps locking
+//! cheap and sync on both the HTTP and render sides. Broadcast is still a
+//! tokio `broadcast` channel: step 2's SSE route will subscribe and re-encode
+//! each `Event` as `data: <json>\n\n`.
 //!
 //! Time is injected: every method that needs "now" takes `now_ms: u64`.
 //! Tests pass deterministic values; production callers use `clock::now_ms()`.
@@ -12,7 +15,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use indexmap::IndexMap;
-use tokio::sync::{broadcast, RwLock};
+use parking_lot::RwLock;
+use tokio::sync::broadcast;
 
 pub mod agent;
 pub mod clock;
