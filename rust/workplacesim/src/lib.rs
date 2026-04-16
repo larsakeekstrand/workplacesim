@@ -8,7 +8,7 @@ pub mod render;
 pub mod server;
 pub mod state;
 
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "desktop", feature = "fb"))]
 pub use server::Shared;
 
 pub use state::{

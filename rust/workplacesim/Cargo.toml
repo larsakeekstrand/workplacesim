@@ -20,8 +20,20 @@ parking_lot = "0.12"
 minifb = { version = "0.27", optional = true }
 image = { version = "0.25", default-features = false, features = ["png"], optional = true }
 
+# Linux-only: /dev/fb0 mmap + raw ioctls for framebuffer mode query and VT
+# management. Kept out of the default graph so `cargo build` on macOS stays
+# lean and doesn't try to compile Linux-specific syscall bindings.
+[target.'cfg(target_os = "linux")'.dependencies]
+memmap2 = "0.9"
+libc = "0.2"
+nix = { version = "0.29", default-features = false, features = ["fs", "ioctl", "mman", "signal"] }
+
 [features]
-default = ["fb"]
+# No renderer by default: `cargo build` produces a server-only binary that
+# works on any platform. Pick a renderer explicitly:
+#   cargo run --features desktop --no-default-features   (macOS window)
+#   cross build --target arm-unknown-linux-gnueabihf --features fb --no-default-features   (Pi)
+default = []
 fb = []
 desktop = ["dep:minifb", "dep:image"]
 

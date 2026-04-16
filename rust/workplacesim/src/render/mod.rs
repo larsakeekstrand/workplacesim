@@ -4,6 +4,7 @@
 //! headless `RenderFrame` — or the minifb desktop window — draw the same world.
 
 pub mod classify;
+pub mod dirty;
 pub mod fx_store;
 pub mod geometry;
 pub mod palette;
@@ -14,6 +15,11 @@ pub mod world;
 
 #[cfg(feature = "desktop")]
 pub mod desktop;
+
+// Framebuffer backend: pure blit functions build on any host so they can be
+// unit tested from macOS; hardware path (mmap, ioctls, VT) is Linux-only.
+#[cfg(feature = "fb")]
+pub mod fb;
 
 pub use classify::{classify, Room, LAB_KEYWORDS};
 pub use geometry::{

@@ -2,6 +2,16 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use tracing_subscriber::EnvFilter;
 
+// Guard against an accidental combination that the build system allows at the
+// Cargo level but that produces two renderers in the main() branches below.
+#[cfg(all(feature = "fb", feature = "desktop"))]
+compile_error!(
+    "features `fb` and `desktop` are mutually exclusive. Pick one:\n  \
+     - desktop: cargo run --features desktop --no-default-features\n  \
+     - fb:      cross build --target arm-unknown-linux-gnueabihf --features fb --no-default-features"
+);
+
+#[cfg_attr(all(feature = "fb", not(target_os = "linux")), allow(dead_code))]
 fn bootstrap_logging() {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
@@ -58,6 +68,7 @@ fn seed_demo_agents(state: &workplacesim::server::Shared, n: usize) {
     }
 }
 
+#[cfg_attr(all(feature = "fb", not(target_os = "linux")), allow(dead_code))]
 fn bind_addr() -> SocketAddr {
     let port: u16 = std::env::var("PORT")
         .ok()
@@ -71,7 +82,9 @@ fn bind_addr() -> SocketAddr {
 }
 
 /// Resolves on SIGINT (Ctrl+C) or SIGTERM (systemd stop). On non-unix,
-/// falls through to just Ctrl+C.
+/// falls through to just Ctrl+C. Only compiled into the server-only branch;
+/// desktop and fb branches run synchronously and handle signals locally.
+#[cfg(not(any(feature = "desktop", feature = "fb")))]
 async fn shutdown_signal() {
     let ctrl_c = async {
         let _ = tokio::signal::ctrl_c().await;
@@ -96,6 +109,32 @@ async fn shutdown_signal() {
     }
 }
 
+/// Bootstrap the axum server on a background tokio runtime. Used by both the
+/// desktop (minifb main-thread constraint) and fb (render on main thread)
+/// paths. The process exits on window close / SIGINT; cancellation of the
+/// server is acceptable-abrupt for MVP.
+#[cfg(any(feature = "desktop", all(feature = "fb", target_os = "linux")))]
+fn spawn_server(
+    addr: SocketAddr,
+    state: workplacesim::server::Shared,
+) -> std::thread::JoinHandle<anyhow::Result<()>> {
+    std::thread::spawn(move || -> anyhow::Result<()> {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()?;
+        rt.block_on(async move {
+            tracing::info!("workplacesim listening on http://{addr}");
+            // Park the server until Ctrl+C; fb signal handler and minifb
+            // window close also force-exit via process::exit from the
+            // renderer branch.
+            let shutdown = async {
+                let _ = tokio::signal::ctrl_c().await;
+            };
+            workplacesim::server::run(addr, state, shutdown).await
+        })
+    })
+}
+
 #[cfg(feature = "desktop")]
 fn main() -> anyhow::Result<()> {
     bootstrap_logging();
@@ -112,16 +151,7 @@ fn main() -> anyhow::Result<()> {
     // minifb on macOS requires the main thread for the window (AppKit
     // constraint). Spawn the axum server on a background tokio runtime and
     // run the window loop on the main thread.
-    let server_state = state.clone();
-    let _server_thread = std::thread::spawn(move || -> anyhow::Result<()> {
-        let rt = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()?;
-        rt.block_on(async move {
-            tracing::info!("workplacesim listening on http://{addr}");
-            workplacesim::server::run(addr, server_state, shutdown_signal()).await
-        })
-    });
+    let _server_thread = spawn_server(addr, state.clone());
 
     workplacesim::render::desktop::run_desktop(state, rx)?;
     // Window closed → drop the server thread along with the process. Step 4a
@@ -130,7 +160,34 @@ fn main() -> anyhow::Result<()> {
     std::process::exit(0);
 }
 
-#[cfg(not(feature = "desktop"))]
+#[cfg(all(feature = "fb", target_os = "linux"))]
+fn main() -> anyhow::Result<()> {
+    bootstrap_logging();
+    let addr = bind_addr();
+
+    let (state, rx) = workplacesim::state::new_state();
+    let _server_thread = spawn_server(addr, state.clone());
+
+    // Renderer runs on the main thread so signal delivery and VtGuard drop
+    // order are predictable. `run_fb` installs its own SIGINT/SIGTERM handler
+    // and polls a shared flag to exit the loop cleanly.
+    workplacesim::render::fb::run_fb(state, rx)?;
+    std::process::exit(0);
+}
+
+// Building with --features fb on a non-Linux host produces a clean error at
+// main() rather than cryptic ioctl/libc symbol failures deeper down.
+#[cfg(all(feature = "fb", not(target_os = "linux")))]
+fn main() -> anyhow::Result<()> {
+    anyhow::bail!(
+        "feature `fb` requires target_os=\"linux\". For macOS dev use:\n  \
+         cargo run --features desktop --no-default-features\n\
+         Cross-compile for Pi 1:\n  \
+         cross build --target arm-unknown-linux-gnueabihf --release --features fb --no-default-features"
+    )
+}
+
+#[cfg(not(any(feature = "desktop", feature = "fb")))]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     bootstrap_logging();
