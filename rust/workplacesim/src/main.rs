@@ -141,8 +141,8 @@ fn main() -> anyhow::Result<()> {
     let addr = bind_addr();
 
     let (state, rx) = workplacesim::state::new_state();
-    // The render thread now owns this receiver. SSE (step 7) will subscribe
-    // separately via `State::subscribe()`.
+    // The render thread owns this receiver; SSE clients subscribe separately
+    // via `State::subscribe_events()` when they connect.
 
     if let Some(n) = parse_demo_count() {
         seed_demo_agents(&state, n);
@@ -154,9 +154,9 @@ fn main() -> anyhow::Result<()> {
     let _server_thread = spawn_server(addr, state.clone());
 
     workplacesim::render::desktop::run_desktop(state, rx)?;
-    // Window closed → drop the server thread along with the process. Step 4a
-    // accepts the abrupt shutdown; step 7 will wire a proper cancellation
-    // channel.
+    // Window closed → drop the server thread along with the process. MVP
+    // accepts the abrupt shutdown; a proper cancellation channel is a future
+    // polish.
     std::process::exit(0);
 }
 
@@ -194,8 +194,9 @@ async fn main() -> anyhow::Result<()> {
     let addr = bind_addr();
 
     let (state, _rx) = workplacesim::state::new_state();
-    // TODO(step 7): wire broadcast receiver to SSE clients; until then, hold
-    // `_rx` so broadcast::Sender::send never fails for "no receivers".
+    // Server-only branch: holding `_rx` keeps the broadcast channel primed so
+    // `Sender::send` doesn't error when there are zero SSE clients connected.
+    // Each SSE client spawns its own receiver via `State::subscribe_events()`.
 
     tracing::info!("workplacesim listening on http://{addr}");
     workplacesim::server::run(addr, state, shutdown_signal()).await

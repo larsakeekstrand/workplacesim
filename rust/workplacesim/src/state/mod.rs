@@ -5,8 +5,8 @@
 //! sync context (minifb's event loop is blocking), so a tokio RwLock would
 //! force us to carry a runtime into the renderer — parking_lot keeps locking
 //! cheap and sync on both the HTTP and render sides. Broadcast is still a
-//! tokio `broadcast` channel: step 2's SSE route will subscribe and re-encode
-//! each `Event` as `data: <json>\n\n`.
+//! tokio `broadcast` channel: the `/events` SSE route subscribes via
+//! `State::subscribe_events()` and re-encodes each `Event` as `data: <json>\n\n`.
 //!
 //! Time is injected: every method that needs "now" takes `now_ms: u64`.
 //! Tests pass deterministic values; production callers use `clock::now_ms()`.
@@ -78,7 +78,7 @@ pub fn new_state() -> (Arc<RwLock<State>>, broadcast::Receiver<Event>) {
 impl State {
     /// Subscribe to the broadcast channel. New subscribers may want to pair
     /// this with `snapshot_event()` to get the current active set.
-    pub fn subscribe(&self) -> broadcast::Receiver<Event> {
+    pub fn subscribe_events(&self) -> broadcast::Receiver<Event> {
         self.tx.subscribe()
     }
 

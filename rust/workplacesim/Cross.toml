@@ -1,0 +1,11 @@
+# `cross` mounts only the crate directory by default, but the Rust server
+# embeds `public/index.html` and `public/main.js` via `include_bytes!` with a
+# path that reaches two levels above the crate. Declare the repo root as a
+# named volume so cargo's include_bytes! resolves the same inside the cross
+# container as it does on the host.
+#
+# Set WORKPLACESIM_REPO to the repo root (the directory containing `public/`)
+# before invoking `cross build`. `deploy/install.sh` exports it automatically.
+[build.env]
+volumes = ["WORKPLACESIM_REPO"]
+passthrough = ["WORKPLACESIM_REPO"]

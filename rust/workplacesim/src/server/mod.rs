@@ -1,8 +1,7 @@
 //! Axum HTTP front-end.
 //!
-//! Mirrors `server/index.js` endpoint-for-endpoint. SSE (`GET /events`) and
-//! static serving (`GET /`) are deferred to step 7; hooks POSTing today
-//! behave identically to the Node server.
+//! Mirrors `server/index.js` endpoint-for-endpoint including the SSE stream
+//! and the two embedded frontend files.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -17,6 +16,8 @@ use crate::state::State;
 
 pub mod error;
 pub mod routes;
+pub mod sse;
+pub mod static_files;
 
 pub type Shared = Arc<RwLock<State>>;
 
@@ -38,7 +39,9 @@ pub fn build_router(state: Shared) -> Router {
         .route("/hooks/tool-event", post(routes::tool_event))
         .route("/hooks/lifecycle", post(routes::lifecycle))
         .route("/api/agents", get(routes::list_agents))
-        // TODO(step 7): GET /events (SSE) and GET / (static serving of public/).
+        .route("/events", get(sse::events))
+        .route("/", get(static_files::index))
+        .route("/main.js", get(static_files::main_js))
         .with_state(state)
         .layer(cors)
 }

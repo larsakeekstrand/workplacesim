@@ -12,6 +12,10 @@ indexmap = { version = "2", features = ["serde"] }
 axum = { version = "0.7", default-features = false, features = ["http1", "json", "tokio"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace"] }
+# BroadcastStream wraps tokio::sync::broadcast::Receiver so SSE handlers can
+# map it through futures combinators into an axum event stream.
+tokio-stream = { version = "0.1", features = ["sync"] }
+futures = { version = "0.3", default-features = false, features = ["std"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 anyhow = "1"
