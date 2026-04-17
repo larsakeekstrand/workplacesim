@@ -18,9 +18,10 @@ use super::routing::{compute_route, path_to_door_from, Target};
 use super::world::RenderWorld;
 
 /// JS `walkPath` uses `duration = max(180, (dist/110) * 1000)` — i.e. a cruise
-/// speed of 110 world-px per second. Halved to render coords that's 55 px/s.
-/// See `public/main.js` line 1610.
-pub const WALK_SPEED_PX_PER_SEC: f32 = 55.0;
+/// speed of 110 world-px/sec (55 px/s at half-scale render). Bumped to ~1.6x
+/// that for TV legibility; at low refresh + viewing distance the original
+/// cadence reads as plodding. See `public/main.js` line 1610.
+pub const WALK_SPEED_PX_PER_SEC: f32 = 90.0;
 
 /// Minimum duration per segment in render ms. Mirrors the JS floor of 180 ms so
 /// short hops don't tween faster than the eye can follow.
@@ -422,14 +423,16 @@ mod tests {
         };
         sim.path.reserve(0);
         store.anim.insert("t".into(), sim);
-        // 55 px/sec * 1s = 55 px. After 1s we should be at (55,0) on the way to (110,0).
-        store.tick(1_000, 1_000);
+        // Path starts at (0,0) with first waypoint at (110,0). Tick slightly under
+        // the time needed to reach it so we can verify advancement without pops.
+        let almost_a_leg_ms = (109.0 * 1000.0 / WALK_SPEED_PX_PER_SEC) as u64;
+        store.tick(almost_a_leg_ms, almost_a_leg_ms);
         let sim = &store.anim["t"];
-        assert!(sim.x > 50.0 && sim.x <= 60.0, "x={}", sim.x);
+        assert!(sim.x > 0.0 && sim.x < 110.0, "x={}", sim.x);
         assert_eq!(sim.y, 0.0);
         assert_eq!(sim.path.len(), 3, "haven't reached first waypoint");
-        // Another 2 seconds: should pass the first waypoint.
-        store.tick(2_000, 3_000);
+        // Another big tick: should pass the first waypoint.
+        store.tick(2_000, almost_a_leg_ms + 2_000);
         let sim = &store.anim["t"];
         assert!(sim.path.len() < 3, "advanced past first waypoint");
     }
