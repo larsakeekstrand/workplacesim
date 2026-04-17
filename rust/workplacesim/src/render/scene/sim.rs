@@ -11,9 +11,11 @@ use super::super::sim_store::{SimAnim, SimState, SimStore};
 use super::super::Framebuffer;
 use super::h;
 
-/// JS `sprite.setScale(1.8)` against 14x28 parts. Halved for render coords we
-/// keep the shape legible at ~0.9x — i.e. a sim occupies ~6x14 render pixels.
-const SIM_SCALE: f32 = 0.9;
+/// JS `sprite.setScale(1.8)` against 14x28 parts. We render at 640x360 (half
+/// JS world), and in practice a scale of 1.8 at render resolution reads much
+/// better on a TV-sized display — each sim occupies ~11x22 render pixels,
+/// doubling on the fb after upscale to roughly 22x44 TV pixels.
+const SIM_SCALE: f32 = 1.8;
 
 /// Paint every alive sim. Y-sorted so north bodies paint before south ones.
 pub fn draw_sims<F: Framebuffer>(fb: &mut F, store: &SimStore) {
@@ -44,17 +46,18 @@ fn draw_sim<F: Framebuffer>(fb: &mut F, sim: &SimAnim) {
 
     // Sizes, in render px. JS parts at scale 1.8 were 14x16 body / 10x10 head /
     // 10x6 hair / 12x5 legs / 24x8 shadow. Halved + SIM_SCALE-tuned to fit the
-    // 640x360 frame while remaining legible.
+    // 640x360 frame while remaining legible. All literal sizes go through
+    // scaled() so the proportions survive any future SIM_SCALE tweak.
     let body_w = scaled(6);
     let body_h = scaled(7);
-    let head_r = 2;
-    let hair_h = 2;
+    let head_r = scaled(2);
+    let hair_h = scaled(2);
     let hair_w = scaled(5);
-    let leg_w = 1;
+    let leg_w = scaled(1);
     let leg_h = scaled(3);
-    let leg_gap = 1;
+    let leg_gap = scaled(1);
     let shadow_w = scaled(8);
-    let shadow_h = 1;
+    let shadow_h = scaled(1);
 
     // Shadow — widest rect, sits under the feet.
     let shadow_y = cy + scaled(6);
