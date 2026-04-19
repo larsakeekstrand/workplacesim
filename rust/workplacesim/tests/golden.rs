@@ -5,22 +5,30 @@
 //! goldens that exercise `draw_status_readout` stub chrono's local time —
 //! that path is skipped in the step6-status golden (time zone dependent).
 
+use workplacesim::config;
 use workplacesim::render::classify::{classify, Room};
-use workplacesim::render::fx_store::{Footstep, FxStore, Halo, Mote, Tether};
+use workplacesim::render::fx_store::{Footstep, FxLimits, FxStore, Halo, Mote, Tether};
 use workplacesim::render::geometry::{lab_stations, Point};
 use workplacesim::render::palette::{self, hash_str};
 use workplacesim::render::sim_store::{SimAnim, SimState, SimStore};
 use workplacesim::render::{scene, RenderFrame, RENDER_H, RENDER_W};
 
+// Default runtime config values; tests use these so the goldens reproduce
+// the pre-config hardcoded behaviour exactly.
+const SPILL_ALPHA: f32 = config::DEFAULT_WINDOW_SPILL_ALPHA;
+const ERROR_GLYPH_MS: u64 = config::DEFAULT_ERROR_GLYPH_MS;
+fn fx_limits() -> FxLimits {
+    FxLimits::default()
+}
+
 const GOLDEN_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden/static-bg.raw");
-const GOLDEN_SIMS_PATH: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden/three-sims.raw");
+const GOLDEN_SIMS_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden/three-sims.raw");
 const GOLDEN_FX_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden/fx-scene.raw");
 
 #[test]
 fn static_background_matches_golden() {
     let mut frame = RenderFrame::new(RENDER_W, RENDER_H);
-    scene::draw_static_background(&mut frame);
+    scene::draw_static_background(&mut frame, SPILL_ALPHA);
     let actual: Vec<u8> = frame.rgb_bytes().to_vec();
 
     if std::env::var_os("REGEN").is_some() {
@@ -30,9 +38,7 @@ fn static_background_matches_golden() {
     }
 
     let expected = std::fs::read(GOLDEN_PATH).unwrap_or_else(|e| {
-        panic!(
-            "golden file missing: {GOLDEN_PATH} ({e}). run with REGEN=1 to create."
-        )
+        panic!("golden file missing: {GOLDEN_PATH} ({e}). run with REGEN=1 to create.")
     });
     assert_eq!(
         actual.len(),
@@ -150,7 +156,7 @@ fn three_sims_matches_golden() {
     seed_three_sims(&mut store);
 
     let mut frame = RenderFrame::new(RENDER_W, RENDER_H);
-    scene::draw_static_background(&mut frame);
+    scene::draw_static_background(&mut frame, SPILL_ALPHA);
     scene::sim::draw_sims(&mut frame, &store);
     let actual: Vec<u8> = frame.rgb_bytes().to_vec();
 
@@ -161,9 +167,7 @@ fn three_sims_matches_golden() {
     }
 
     let expected = std::fs::read(GOLDEN_SIMS_PATH).unwrap_or_else(|e| {
-        panic!(
-            "golden file missing: {GOLDEN_SIMS_PATH} ({e}). run with REGEN=1 to create."
-        )
+        panic!("golden file missing: {GOLDEN_SIMS_PATH} ({e}). run with REGEN=1 to create.")
     });
     assert_eq!(
         actual.len(),
@@ -245,10 +249,10 @@ fn fx_scene_matches_golden() {
     let now_ms: u64 = 1_000;
 
     let mut frame = RenderFrame::new(RENDER_W, RENDER_H);
-    scene::draw_static_background(&mut frame);
-    scene::effects::draw_below(&mut frame, &fx, &store, now_ms);
+    scene::draw_static_background(&mut frame, SPILL_ALPHA);
+    scene::effects::draw_below(&mut frame, &fx, &store, now_ms, &fx_limits());
     scene::sim::draw_sims(&mut frame, &store);
-    scene::effects::draw_above(&mut frame, &fx, &store, now_ms);
+    scene::effects::draw_above(&mut frame, &fx, &store, now_ms, &fx_limits());
     let actual: Vec<u8> = frame.rgb_bytes().to_vec();
 
     if std::env::var_os("REGEN").is_some() {
@@ -288,10 +292,16 @@ use workplacesim::render::fx_store::{BenchFlash, FileTick};
 use workplacesim::render::geometry::meeting_seats;
 use workplacesim::state::{Agent, CurrentError, Visit};
 
-const GOLDEN_WB_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden/step6-whiteboard.raw");
-const GOLDEN_TICKER_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden/step6-ticker.raw");
-const GOLDEN_GLYPHS_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden/step6-glyphs.raw");
-const GOLDEN_BENCH_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden/step6-bench.raw");
+const GOLDEN_WB_PATH: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/golden/step6-whiteboard.raw"
+);
+const GOLDEN_TICKER_PATH: &str =
+    concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden/step6-ticker.raw");
+const GOLDEN_GLYPHS_PATH: &str =
+    concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden/step6-glyphs.raw");
+const GOLDEN_BENCH_PATH: &str =
+    concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden/step6-bench.raw");
 
 fn compare_or_regen(path: &str, actual: &[u8]) {
     if std::env::var_os("REGEN").is_some() {
@@ -354,7 +364,7 @@ fn step6_whiteboard_matches_golden() {
         ..Default::default()
     };
     let mut frame = RenderFrame::new(RENDER_W, RENDER_H);
-    scene::draw_static_background(&mut frame);
+    scene::draw_static_background(&mut frame, SPILL_ALPHA);
     scene::sim::draw_sims(&mut frame, &store);
     let agents = [&agent];
     scene::text::draw_whiteboard(&mut frame, &store, &agents);
@@ -379,9 +389,9 @@ fn step6_ticker_matches_golden() {
         born_ms: now_ms - 500,
     });
     let mut frame = RenderFrame::new(RENDER_W, RENDER_H);
-    scene::draw_static_background(&mut frame);
+    scene::draw_static_background(&mut frame, SPILL_ALPHA);
     scene::sim::draw_sims(&mut frame, &store);
-    scene::text::draw_file_ticker(&mut frame, &fx, now_ms);
+    scene::text::draw_file_ticker(&mut frame, &fx, now_ms, &fx_limits());
     compare_or_regen(GOLDEN_TICKER_PATH, frame.rgb_bytes());
 }
 
@@ -390,7 +400,14 @@ fn step6_glyphs_matches_golden() {
     let mut store = SimStore::new();
     let mut agents: Vec<Agent> = Vec::new();
     let now_ms = 120_000u64;
-    let mk_sim = |store: &mut SimStore, id: &str, user: &str, room: Room, pos: (i32, i32), mode: &str, state: SimState, seated_since: Option<u64>| {
+    let mk_sim = |store: &mut SimStore,
+                  id: &str,
+                  user: &str,
+                  room: Room,
+                  pos: (i32, i32),
+                  mode: &str,
+                  state: SimState,
+                  seated_since: Option<u64>| {
         let seat = store.seats.allocate(room, id);
         store.anim.insert(
             id.into(),
@@ -421,39 +438,113 @@ fn step6_glyphs_matches_golden() {
     };
 
     let labs = lab_stations();
-    mk_sim(&mut store, "lab", "bob", Room::Lab, (labs[1].seat_x, labs[1].seat_y), "default", SimState::Seated, Some(now_ms - 5_000));
+    mk_sim(
+        &mut store,
+        "lab",
+        "bob",
+        Room::Lab,
+        (labs[1].seat_x, labs[1].seat_y),
+        "default",
+        SimState::Seated,
+        Some(now_ms - 5_000),
+    );
     agents.push(Agent {
         agent_id: "lab".into(),
-        visit: Some(Visit { room: "test".into(), until: now_ms + 10_000 }),
+        visit: Some(Visit {
+            room: "test".into(),
+            until: now_ms + 10_000,
+        }),
         ..Default::default()
     });
 
-    mk_sim(&mut store, "walker", "carol", Room::Desk, (300, 256), "default", SimState::WalkingIn, None);
-    agents.push(Agent { agent_id: "walker".into(), ..Default::default() });
+    mk_sim(
+        &mut store,
+        "walker",
+        "carol",
+        Room::Desk,
+        (300, 256),
+        "default",
+        SimState::WalkingIn,
+        None,
+    );
+    agents.push(Agent {
+        agent_id: "walker".into(),
+        ..Default::default()
+    });
 
-    mk_sim(&mut store, "veteran", "dave", Room::Desk, (360, 384), "default", SimState::Seated, Some(now_ms - 90_000));
-    agents.push(Agent { agent_id: "veteran".into(), ..Default::default() });
+    mk_sim(
+        &mut store,
+        "veteran",
+        "dave",
+        Room::Desk,
+        (360, 384),
+        "default",
+        SimState::Seated,
+        Some(now_ms - 90_000),
+    );
+    agents.push(Agent {
+        agent_id: "veteran".into(),
+        ..Default::default()
+    });
 
-    mk_sim(&mut store, "idler", "eve", Room::Desk, (520, 384), "default", SimState::Seated, Some(now_ms - 10_000));
-    agents.push(Agent { agent_id: "idler".into(), idle: Some(true), ..Default::default() });
+    mk_sim(
+        &mut store,
+        "idler",
+        "eve",
+        Room::Desk,
+        (520, 384),
+        "default",
+        SimState::Seated,
+        Some(now_ms - 10_000),
+    );
+    agents.push(Agent {
+        agent_id: "idler".into(),
+        idle: Some(true),
+        ..Default::default()
+    });
 
     let ms = meeting_seats();
-    mk_sim(&mut store, "plan", "flora", Room::Meeting, (ms[0].seat_x, ms[0].seat_y), "plan", SimState::Seated, Some(now_ms - 100));
-    agents.push(Agent { agent_id: "plan".into(), ..Default::default() });
+    mk_sim(
+        &mut store,
+        "plan",
+        "flora",
+        Room::Meeting,
+        (ms[0].seat_x, ms[0].seat_y),
+        "plan",
+        SimState::Seated,
+        Some(now_ms - 100),
+    );
+    agents.push(Agent {
+        agent_id: "plan".into(),
+        ..Default::default()
+    });
 
-    mk_sim(&mut store, "erred", "frank", Room::Desk, (680, 384), "default", SimState::Seated, Some(now_ms - 2_000));
+    mk_sim(
+        &mut store,
+        "erred",
+        "frank",
+        Room::Desk,
+        (680, 384),
+        "default",
+        SimState::Seated,
+        Some(now_ms - 2_000),
+    );
     agents.push(Agent {
         agent_id: "erred".into(),
-        current_error: Some(CurrentError { tool_name: "Bash".into(), message: "e".into(), ts: now_ms - 500 }),
+        current_error: Some(CurrentError {
+            tool_name: "Bash".into(),
+            message: "e".into(),
+            ts: now_ms - 500,
+        }),
         ..Default::default()
     });
 
     let fx = FxStore::new();
     let mut frame = RenderFrame::new(RENDER_W, RENDER_H);
-    scene::draw_static_background(&mut frame);
+    scene::draw_static_background(&mut frame, SPILL_ALPHA);
     scene::sim::draw_sims(&mut frame, &store);
     let agent_refs: Vec<&Agent> = agents.iter().collect();
-    scene::glyph::draw_glyphs(&mut frame, &store, &agent_refs, &fx, now_ms);
+    scene::glyph::draw_glyphs(&mut frame, &store, &agent_refs, &fx, now_ms, ERROR_GLYPH_MS);
     compare_or_regen(GOLDEN_GLYPHS_PATH, frame.rgb_bytes());
 }
 
@@ -493,9 +584,9 @@ fn step6_bench_matches_golden() {
         born_ms: now_ms - 200,
     });
     let mut frame = RenderFrame::new(RENDER_W, RENDER_H);
-    scene::draw_static_background(&mut frame);
+    scene::draw_static_background(&mut frame, SPILL_ALPHA);
     scene::sim::draw_sims(&mut frame, &store);
-    scene::text::draw_bench_flashes(&mut frame, &fx, now_ms);
+    scene::text::draw_bench_flashes(&mut frame, &fx, now_ms, &fx_limits());
     compare_or_regen(GOLDEN_BENCH_PATH, frame.rgb_bytes());
 }
 

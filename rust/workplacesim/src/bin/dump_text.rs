@@ -2,8 +2,9 @@
 //! a scene exercising every step-6 surface and writes a PNG to /tmp. Only used
 //! for visual verification — not part of the shipped binary.
 
+use workplacesim::config;
 use workplacesim::render::classify::{classify, Room};
-use workplacesim::render::fx_store::{BenchFlash, FileTick, FxStore, Halo};
+use workplacesim::render::fx_store::{BenchFlash, FileTick, FxLimits, FxStore, Halo};
 use workplacesim::render::geometry::{lab_stations, meeting_seats, Point};
 use workplacesim::render::palette;
 use workplacesim::render::scene;
@@ -196,15 +197,23 @@ fn main() -> anyhow::Result<()> {
 
     let mut frame = RenderFrame::new(RENDER_W, RENDER_H);
     frame.clear(palette::BG);
-    scene::draw_static_background(&mut frame);
-    scene::effects::draw_below(&mut frame, &fx, &store, now_ms);
+    let limits = FxLimits::default();
+    scene::draw_static_background(&mut frame, config::DEFAULT_WINDOW_SPILL_ALPHA);
+    scene::effects::draw_below(&mut frame, &fx, &store, now_ms, &limits);
     scene::sim::draw_sims(&mut frame, &store);
     let agent_refs: Vec<&Agent> = agents.iter().collect();
-    scene::glyph::draw_glyphs(&mut frame, &store, &agent_refs, &fx, now_ms);
-    scene::effects::draw_above(&mut frame, &fx, &store, now_ms);
+    scene::glyph::draw_glyphs(
+        &mut frame,
+        &store,
+        &agent_refs,
+        &fx,
+        now_ms,
+        config::DEFAULT_ERROR_GLYPH_MS,
+    );
+    scene::effects::draw_above(&mut frame, &fx, &store, now_ms, &limits);
     scene::text::draw_whiteboard(&mut frame, &store, &agent_refs);
-    scene::text::draw_file_ticker(&mut frame, &fx, now_ms);
-    scene::text::draw_bench_flashes(&mut frame, &fx, now_ms);
+    scene::text::draw_file_ticker(&mut frame, &fx, now_ms, &limits);
+    scene::text::draw_bench_flashes(&mut frame, &fx, now_ms, &limits);
     scene::text::draw_status_readout(&mut frame, now_ms, 0, Some(now_ms - 45_000));
 
     let path = std::env::args()

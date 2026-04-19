@@ -1,0 +1,838 @@
+<!doctype html>
+<!-- workplacesim-config-page -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>workplacesim — config</title>
+    <style>
+      :root {
+        --bg: #0b0d12;
+        --bg-elev: #121620;
+        --bg-inset: #0e1318;
+        --fg: #d4d7dc;
+        --fg-dim: #8a93a0;
+        --fg-faint: #555d6c;
+        --accent: #7fc7ff;
+        --accent-dim: #4d7fa8;
+        --ok: #8be98b;
+        --warn: #ffb86c;
+        --err: #ff6b6b;
+        --rule: #1a2028;
+      }
+      html, body {
+        margin: 0;
+        padding: 0;
+        min-height: 100%;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+        font-size: 13px;
+        line-height: 1.5;
+      }
+      .wrap {
+        max-width: 880px;
+        margin: 0 auto;
+        padding: 24px 20px 48px;
+      }
+      h1 {
+        font-size: 15px;
+        font-weight: 500;
+        margin: 0 0 16px;
+        color: var(--fg);
+        letter-spacing: 0.02em;
+      }
+      h1 .dim { color: var(--fg-dim); }
+      .section-title {
+        color: var(--accent);
+        font-size: 12px;
+        letter-spacing: 0.12em;
+        margin: 20px 0 8px;
+      }
+      .panel {
+        background: var(--bg-elev);
+        border: 1px solid var(--rule);
+        border-radius: 4px;
+        padding: 12px 14px;
+      }
+      .status-grid {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 4px 14px;
+      }
+      .status-grid dt {
+        color: var(--fg-dim);
+      }
+      .status-grid dd {
+        margin: 0;
+        color: var(--fg);
+        overflow-wrap: anywhere;
+      }
+      .tag {
+        display: inline-block;
+        margin-left: 6px;
+        padding: 0 6px;
+        font-size: 11px;
+        color: var(--bg);
+        background: var(--accent);
+        border-radius: 2px;
+      }
+      .tag.warn { background: var(--warn); }
+      .tag.err { background: var(--err); color: #fff; }
+      .tag.ok { background: var(--ok); color: var(--bg); }
+      .tag.dim { background: var(--fg-faint); color: var(--bg); }
+      /* Per-field "requires restart" chip on form labels. Muted amber, uppercase,
+         smaller than the status panel tags so it doesn't steal focus. */
+      .tag-warn {
+        display: inline-block;
+        margin-left: 6px;
+        padding: 0 4px;
+        color: #f0c67a;
+        background: transparent;
+        border: 1px solid #f0c67a;
+        border-radius: 2px;
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+        font-size: 0.75em;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        vertical-align: 1px;
+      }
+      /* Inline "Restart now" link used in the post-save amber banner. */
+      #banner .banner-action {
+        margin-left: 10px;
+        color: inherit;
+        text-decoration: underline;
+        cursor: pointer;
+        background: none;
+        border: none;
+        padding: 0;
+        font: inherit;
+      }
+      #banner .banner-action:hover { opacity: 0.8; }
+      /* Restart service button — outlined, amber on hover, to separate from Save. */
+      button.outline-warn {
+        border-color: #5a4020;
+        color: var(--warn);
+      }
+      button.outline-warn:hover {
+        border-color: var(--warn);
+        color: var(--warn);
+      }
+      details {
+        border-top: 1px solid var(--rule);
+        padding: 10px 0 4px;
+      }
+      details:first-of-type { border-top: none; }
+      summary {
+        cursor: pointer;
+        color: var(--accent);
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        padding: 2px 0;
+        user-select: none;
+        outline: none;
+      }
+      summary::marker { color: var(--fg-dim); }
+      summary .hint {
+        margin-left: 10px;
+        color: var(--fg-dim);
+        font-size: 11px;
+        letter-spacing: 0;
+      }
+      .field {
+        display: grid;
+        grid-template-columns: 220px 1fr 6ch;
+        align-items: center;
+        gap: 10px;
+        padding: 4px 0;
+      }
+      .field label {
+        color: var(--fg);
+      }
+      .field .live {
+        display: inline-block;
+        margin-left: 8px;
+        padding: 0 5px;
+        font-size: 10px;
+        color: var(--bg);
+        background: var(--ok);
+        border-radius: 2px;
+        vertical-align: 1px;
+      }
+      .field input[type="range"] {
+        width: 100%;
+        accent-color: var(--accent);
+      }
+      .field input[type="number"] {
+        width: 6ch;
+        background: var(--bg-inset);
+        color: var(--fg);
+        border: 1px solid var(--rule);
+        border-radius: 2px;
+        padding: 2px 4px;
+        font: inherit;
+        text-align: right;
+      }
+      .field input[type="number"]:focus,
+      .field input[type="range"]:focus {
+        outline: 1px solid var(--accent-dim);
+      }
+      .field.bool {
+        grid-template-columns: 220px 1fr;
+      }
+      .field.bool input[type="checkbox"] {
+        justify-self: start;
+        accent-color: var(--accent);
+      }
+      .actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 16px;
+        flex-wrap: wrap;
+      }
+      button {
+        background: var(--bg-inset);
+        color: var(--fg);
+        border: 1px solid var(--rule);
+        border-radius: 2px;
+        padding: 6px 14px;
+        font: inherit;
+        cursor: pointer;
+      }
+      button:hover { border-color: var(--accent-dim); color: var(--accent); }
+      button:focus { outline: 1px solid var(--accent-dim); }
+      button.primary {
+        background: var(--accent-dim);
+        color: var(--bg);
+        border-color: var(--accent-dim);
+      }
+      button.primary:hover { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+      button:disabled { opacity: 0.5; cursor: default; }
+
+      #banner {
+        display: none;
+        margin: 16px 0 0;
+        padding: 10px 14px;
+        border-radius: 3px;
+        border: 1px solid var(--rule);
+        font-size: 12px;
+      }
+      #banner.ok { display: block; background: #152417; border-color: #2c4a34; color: var(--ok); }
+      #banner.warn { display: block; background: #2a1f12; border-color: #5a4020; color: var(--warn); }
+      #banner.err { display: block; background: #2a1515; border-color: #5a2525; color: var(--err); }
+      #banner .close {
+        float: right;
+        cursor: pointer;
+        opacity: 0.6;
+        padding: 0 4px;
+      }
+      #banner .close:hover { opacity: 1; }
+
+      .display-note {
+        margin: 4px 0 0;
+        padding: 4px 0 0;
+        color: var(--fg-dim);
+        font-size: 11px;
+      }
+
+      @media (max-width: 620px) {
+        .field {
+          grid-template-columns: 1fr 6ch;
+          grid-template-areas:
+            "label  number"
+            "slider slider";
+        }
+        .field label { grid-area: label; }
+        .field input[type="number"] { grid-area: number; justify-self: end; }
+        .field input[type="range"] { grid-area: slider; }
+        .field.bool { grid-template-columns: 1fr; grid-template-areas: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>workplacesim <span class="dim">— config</span></h1>
+
+      <div class="section-title">[STATUS]</div>
+      <div class="panel" id="status-panel">
+        <dl class="status-grid" id="status-grid">
+          <dt>uptime:</dt><dd id="s-uptime">—</dd>
+          <dt>agents:</dt><dd id="s-agents">—</dd>
+          <dt></dt><dd id="s-rooms">—</dd>
+          <dt>events:</dt><dd id="s-events">—</dd>
+          <dt>build:</dt><dd id="s-build">—</dd>
+          <dt>config:</dt><dd id="s-config">—</dd>
+          <dt id="s-fb-label" hidden>fb:</dt><dd id="s-fb" hidden>—</dd>
+        </dl>
+      </div>
+
+      <div class="section-title">[SETTINGS]</div>
+      <form id="form" class="panel" autocomplete="off">
+        <div id="groups"><em style="color: var(--fg-dim);">loading…</em></div>
+
+        <div class="actions">
+          <button type="button" id="btn-save" class="primary">Save</button>
+          <button type="button" id="btn-reset">Reset to defaults</button>
+          <button type="button" id="btn-reload">Reload</button>
+          <button type="button" id="btn-restart" class="outline-warn"
+            title="Bounce the systemd service so display settings take effect">Restart service</button>
+        </div>
+
+        <div id="banner" role="status" aria-live="polite">
+          <span class="close" id="banner-close" title="dismiss (Esc)">×</span>
+          <span id="banner-text"></span>
+        </div>
+      </form>
+    </div>
+
+    <script>
+      // ------------------------------------------------------------
+      // Schema: which group each config field lives under, and a nice
+      // human label. Fields listed here must exist in /api/config/bounds.
+      // ------------------------------------------------------------
+      const GROUPS = {
+        'Motion': ['walk_speed_px_per_sec', 'min_segment_ms', 'bob_cycle_ms'],
+        'Effects': ['footstep_lifetime_ms', 'footstep_interval_ms', 'mote_lifetime_ms',
+                    'mote_cap', 'tether_lifetime_ms', 'halo_lifetime_ms', 'error_glyph_ms'],
+        'Ticker': ['file_tick_ms', 'file_tick_cap', 'bench_flash_ms', 'window_spill_alpha'],
+        'Lifecycle': ['pending_ttl_ms', 'stop_grace_ms', 'visit_min_ms',
+                      'visit_max_ms', 'visit_default_ms'],
+        'Display': ['window_w', 'window_h', 'fullscreen', 'target_fps'],
+      };
+
+      const LABELS = {
+        walk_speed_px_per_sec: 'walk speed (px/s)',
+        min_segment_ms: 'min segment (ms)',
+        bob_cycle_ms: 'bob cycle (ms)',
+        footstep_lifetime_ms: 'footstep lifetime (ms)',
+        footstep_interval_ms: 'footstep interval (ms)',
+        mote_lifetime_ms: 'mote lifetime (ms)',
+        mote_cap: 'mote cap',
+        tether_lifetime_ms: 'tether lifetime (ms)',
+        halo_lifetime_ms: 'halo lifetime (ms)',
+        error_glyph_ms: 'error glyph (ms)',
+        file_tick_ms: 'file tick (ms)',
+        file_tick_cap: 'file tick cap',
+        bench_flash_ms: 'bench flash (ms)',
+        window_spill_alpha: 'window spill alpha',
+        pending_ttl_ms: 'pending TTL (ms)',
+        stop_grace_ms: 'stop grace (ms)',
+        visit_min_ms: 'visit min (ms)',
+        visit_max_ms: 'visit max (ms)',
+        visit_default_ms: 'visit default (ms)',
+        window_w: 'window width (px)',
+        window_h: 'window height (px)',
+        fullscreen: 'fullscreen',
+        target_fps: 'target FPS',
+      };
+
+      // Fields that apply live right now. Server-reported `restart_required`
+      // drives the opposite badge; this list is still local because "Live" is
+      // a UI-specific affordance, not a server concept.
+      const LIVE_FIELDS = new Set(['target_fps']);
+
+      // Read the server-reported restart flag off a bounds entry. Handles both
+      // the numeric variant (F32/U32/U64/Usize) and the bool variant.
+      function boundRequiresRestart(b) {
+        return !!(b && b.restart_required);
+      }
+
+      // True if at least one key in `patch` is a restart-required field per the
+      // current /api/config/bounds map. Used to flip the post-save banner.
+      function patchRequiresRestart(patch) {
+        if (!bounds) return false;
+        for (const key of Object.keys(patch)) {
+          if (boundRequiresRestart(bounds[key])) return true;
+        }
+        return false;
+      }
+
+      // ------------------------------------------------------------
+      // State
+      // ------------------------------------------------------------
+      let bounds = null;        // /api/config/bounds response
+      let baseline = null;      // last-known-saved config
+      let current = null;       // form-driven working copy
+      let saving = false;       // pause polling while a save is in flight
+      let restarting = false;   // pause polling while a restart watcher owns it
+      let offline = false;      // status fetch failure flag
+      let lastUptimeMs = 0;     // most recent /api/status uptime_ms, used by the restart watcher
+
+      // ------------------------------------------------------------
+      // Utility
+      // ------------------------------------------------------------
+      function fmtUptime(ms) {
+        const s = Math.floor(ms / 1000);
+        const hh = String(Math.floor(s / 3600)).padStart(2, '0');
+        const mm = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
+        const ss = String(s % 60).padStart(2, '0');
+        return `${hh}:${mm}:${ss}`;
+      }
+
+      function clearChildren(node) {
+        while (node.firstChild) node.removeChild(node.firstChild);
+      }
+
+      function showBanner(kind, text) {
+        const b = document.getElementById('banner');
+        const textNode = document.getElementById('banner-text');
+        clearChildren(textNode);
+        textNode.appendChild(document.createTextNode(text));
+        b.className = kind;
+      }
+      // Same as showBanner but appends an inline `[action]` link after the text.
+      // The action callback is invoked on click — no href/navigation.
+      function showBannerWithAction(kind, text, actionLabel, onClick) {
+        const b = document.getElementById('banner');
+        const textNode = document.getElementById('banner-text');
+        clearChildren(textNode);
+        textNode.appendChild(document.createTextNode(text));
+        const link = document.createElement('button');
+        link.type = 'button';
+        link.className = 'banner-action';
+        link.textContent = actionLabel;
+        link.addEventListener('click', onClick);
+        textNode.appendChild(link);
+        b.className = kind;
+      }
+      function hideBanner() {
+        document.getElementById('banner').className = '';
+      }
+      // Disable/enable all action buttons together. The restart watcher and
+      // the save flow both want this; keep it centralised so no state drift.
+      function setActionsDisabled(disabled) {
+        for (const id of ['btn-save', 'btn-reset', 'btn-restart', 'btn-reload']) {
+          const el = document.getElementById(id);
+          if (el) el.disabled = disabled;
+        }
+      }
+
+      function isNumericBound(b) {
+        return b && typeof b === 'object' && 'min' in b && 'max' in b;
+      }
+      function isBoolBound(b) {
+        return b && typeof b === 'object' && !('min' in b) && typeof b.default === 'boolean';
+      }
+      function isFloatBound(b) {
+        return isNumericBound(b) && b.kind === 'f32';
+      }
+
+      // ------------------------------------------------------------
+      // Form rendering
+      // ------------------------------------------------------------
+      function renderGroups() {
+        const host = document.getElementById('groups');
+        clearChildren(host);
+        for (const [groupName, fields] of Object.entries(GROUPS)) {
+          const det = document.createElement('details');
+          det.open = true;
+          const sum = document.createElement('summary');
+          sum.textContent = `[${groupName}]`;
+          det.appendChild(sum);
+
+          for (const key of fields) {
+            const b = bounds[key];
+            if (!b) continue;
+            det.appendChild(renderField(key, b));
+          }
+
+          // Per-field [restart] badges replace the previous free-floating
+          // Display note, so there's nothing to append for Display here.
+
+          host.appendChild(det);
+        }
+      }
+
+      function renderField(key, b) {
+        const row = document.createElement('div');
+        row.className = 'field' + (isBoolBound(b) ? ' bool' : '');
+
+        const label = document.createElement('label');
+        label.htmlFor = `f-${key}`;
+        label.textContent = LABELS[key] || key;
+        if (LIVE_FIELDS.has(key)) {
+          const live = document.createElement('span');
+          live.className = 'live';
+          live.textContent = 'Live';
+          label.appendChild(live);
+        }
+        if (boundRequiresRestart(b)) {
+          const tag = document.createElement('span');
+          tag.className = 'tag-warn';
+          tag.textContent = '[restart]';
+          tag.title = 'Takes effect after a service restart';
+          label.appendChild(tag);
+        }
+        row.appendChild(label);
+
+        if (isBoolBound(b)) {
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.id = `f-${key}`;
+          cb.name = key;
+          cb.checked = !!current[key];
+          cb.addEventListener('change', () => { current[key] = cb.checked; });
+          row.appendChild(cb);
+          return row;
+        }
+
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.id = `f-${key}`;
+        slider.name = key;
+        slider.min = String(b.min);
+        slider.max = String(b.max);
+        slider.setAttribute('aria-label', LABELS[key] || key);
+        const step = isFloatBound(b) ? Math.max((b.max - b.min) / 1000, 0.001) : 1;
+        slider.step = String(step);
+        slider.value = String(current[key]);
+
+        const num = document.createElement('input');
+        num.type = 'number';
+        num.id = `f-${key}-n`;
+        num.setAttribute('aria-label', (LABELS[key] || key) + ' (numeric)');
+        num.min = String(b.min);
+        num.max = String(b.max);
+        num.step = isFloatBound(b) ? 'any' : '1';
+        num.value = String(current[key]);
+
+        slider.addEventListener('input', () => {
+          const v = isFloatBound(b) ? parseFloat(slider.value) : parseInt(slider.value, 10);
+          current[key] = v;
+          num.value = String(v);
+        });
+        num.addEventListener('input', () => {
+          const raw = num.value.trim();
+          if (raw === '') return;
+          const v = isFloatBound(b) ? parseFloat(raw) : parseInt(raw, 10);
+          if (Number.isNaN(v)) return;
+          current[key] = v;
+          // Pin the slider to [min, max] even if the number input has an out-of-range value.
+          slider.value = String(Math.min(Math.max(v, b.min), b.max));
+        });
+
+        row.appendChild(slider);
+        row.appendChild(num);
+        return row;
+      }
+
+      // Build a patch with only the fields that differ from baseline.
+      function buildPatch() {
+        const patch = {};
+        for (const key of Object.keys(bounds)) {
+          if (current[key] !== baseline[key]) {
+            patch[key] = current[key];
+          }
+        }
+        return patch;
+      }
+
+      // ------------------------------------------------------------
+      // Network
+      // ------------------------------------------------------------
+      async function loadAll() {
+        try {
+          const [bRes, cRes] = await Promise.all([
+            fetch('/api/config/bounds'),
+            fetch('/api/config'),
+          ]);
+          if (!bRes.ok || !cRes.ok) throw new Error('bad status');
+          bounds = await bRes.json();
+          const cfg = await cRes.json();
+          baseline = { ...cfg };
+          current = { ...cfg };
+          renderGroups();
+          hideBanner();
+        } catch (e) {
+          showBanner('err', `Failed to load config: ${e.message || e}`);
+        }
+      }
+
+      async function reloadConfig() {
+        try {
+          const r = await fetch('/api/config');
+          if (!r.ok) throw new Error('bad status');
+          const cfg = await r.json();
+          baseline = { ...cfg };
+          current = { ...cfg };
+          renderGroups();
+          showBanner('ok', 'Reloaded from server.');
+        } catch (e) {
+          showBanner('err', `Failed to reload: ${e.message || e}`);
+        }
+      }
+
+      async function save() {
+        if (saving) return;
+        saving = true;
+        const btn = document.getElementById('btn-save');
+        btn.disabled = true;
+        try {
+          const patch = buildPatch();
+          if (Object.keys(patch).length === 0) {
+            showBanner('ok', 'No changes to save.');
+            return;
+          }
+          const needsRestart = patchRequiresRestart(patch);
+          const r = await fetch('/api/config', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(patch),
+          });
+          if (r.status >= 400) {
+            let msg = `Server rejected the change (HTTP ${r.status}).`;
+            try {
+              const body = await r.json();
+              if (body && body.details) msg = `${body.error || 'error'}: ${body.details}`;
+              else if (body && body.error) msg = body.error;
+            } catch (_) { /* non-JSON body */ }
+            showBanner('err', msg);
+            return;
+          }
+          const body = await r.json();
+          baseline = { ...body.config };
+          current = { ...body.config };
+          renderGroups();
+          if (body.save_error) {
+            showBanner('warn',
+              `Applied in memory, but couldn't write to disk: ${body.save_error}. ` +
+              `Changes will be lost on restart.`);
+          } else if (needsRestart) {
+            // Amber, not red — the save succeeded; it's just that some of the
+            // fields won't manifest on screen until the service bounces.
+            showBannerWithAction(
+              'warn',
+              'Saved. Some changes require a service restart.',
+              '[Restart now]',
+              restartService,
+            );
+          } else {
+            showBanner('ok', 'Saved. Changes live.');
+          }
+        } catch (e) {
+          showBanner('err', `Save failed: ${e.message || e}`);
+        } finally {
+          saving = false;
+          btn.disabled = false;
+        }
+      }
+
+      async function resetDefaults() {
+        if (!confirm('Reset all settings to defaults?')) return;
+        try {
+          const r = await fetch('/api/config/reset', { method: 'POST' });
+          if (!r.ok) {
+            showBanner('err', `Reset failed (HTTP ${r.status}).`);
+            return;
+          }
+          const body = await r.json();
+          baseline = { ...body.config };
+          current = { ...body.config };
+          renderGroups();
+          if (body.save_error) {
+            showBanner('warn', `Reset in memory, but couldn't write to disk: ${body.save_error}.`);
+          } else {
+            showBanner('ok', 'Reset to defaults.');
+          }
+        } catch (e) {
+          showBanner('err', `Reset failed: ${e.message || e}`);
+        }
+      }
+
+      // ------------------------------------------------------------
+      // Restart flow
+      // ------------------------------------------------------------
+      async function restartService() {
+        if (restarting) return;
+        if (!confirm(
+          'Restart the workplacesim service? The page will briefly disconnect ' +
+          'while the process restarts.'
+        )) return;
+
+        restarting = true;
+        setActionsDisabled(true);
+        showBanner('warn', 'Restarting service…');
+
+        let resp;
+        try {
+          resp = await fetch('/api/restart', { method: 'POST' });
+        } catch (e) {
+          showBanner('err', `Restart request failed: ${e.message || e}`);
+          restarting = false;
+          setActionsDisabled(false);
+          return;
+        }
+
+        if (resp.status === 409) {
+          showBanner('err', 'Restart not available — not running under systemd (dev build).');
+          restarting = false;
+          setActionsDisabled(false);
+          return;
+        }
+        if (resp.status !== 202) {
+          showBanner('err', `Unexpected response (HTTP ${resp.status}).`);
+          restarting = false;
+          setActionsDisabled(false);
+          return;
+        }
+
+        // Snapshot the uptime we have RIGHT NOW. Once /api/status answers
+        // with uptime_ms < snapshot, we know a fresh process is up.
+        const preRestartUptime = lastUptimeMs;
+        await watchForRestart(preRestartUptime);
+      }
+
+      // Poll /api/status every 500 ms up to 20 s waiting for the uptime to
+      // drop below `preRestartUptime`. That's the signal that systemd has
+      // spawned a fresh process. On success, reload config, show green
+      // banner, re-enable buttons. On timeout, show red banner.
+      async function watchForRestart(preRestartUptime) {
+        const startedAt = Date.now();
+        const TIMEOUT_MS = 20_000;
+        const POLL_MS = 500;
+
+        while (Date.now() - startedAt < TIMEOUT_MS) {
+          await new Promise(r => setTimeout(r, POLL_MS));
+          try {
+            const r = await fetch('/api/status');
+            if (r.ok) {
+              const s = await r.json();
+              const up = s.uptime_ms || 0;
+              if (up < preRestartUptime) {
+                // Fresh process.
+                lastUptimeMs = up;
+                showBanner('ok', 'Service restarted.');
+                restarting = false;
+                setActionsDisabled(false);
+                // Refetch config + bounds — on-disk file may have changed
+                // between saves and now, and bounds shouldn't drift but it's
+                // harmless to refresh.
+                await loadAll();
+                setTimeout(() => {
+                  // Only clear the success banner if the user hasn't replaced it.
+                  const b = document.getElementById('banner');
+                  if (b.classList.contains('ok') &&
+                      document.getElementById('banner-text').textContent ===
+                        'Service restarted.') {
+                    hideBanner();
+                  }
+                }, 2500);
+                return;
+              }
+            }
+            // 5xx or still-old uptime: keep the user informed without spamming.
+            showBanner('warn', 'Restarting service… connecting…');
+          } catch (_e) {
+            // Network error while the process is restarting is expected.
+            showBanner('warn', 'Restarting service… connecting…');
+          }
+        }
+
+        showBanner('err', 'Restart timed out — check the service on the host.');
+        restarting = false;
+        setActionsDisabled(false);
+      }
+
+      // ------------------------------------------------------------
+      // Status polling
+      // ------------------------------------------------------------
+      async function pollStatus() {
+        if (saving || restarting) return;
+        try {
+          const r = await fetch('/api/status');
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const s = await r.json();
+          offline = false;
+          lastUptimeMs = s.uptime_ms || 0;
+
+          document.getElementById('s-uptime').textContent = fmtUptime(s.uptime_ms || 0);
+
+          const by = s.agents && s.agents.by_type || {};
+          const types = Object.entries(by).map(([k, v]) => `${k} ${v}`).join(', ');
+          const total = (s.agents && s.agents.total) || 0;
+          document.getElementById('s-agents').textContent =
+            types ? `${total} (${types})` : String(total);
+
+          const rm = (s.agents && s.agents.by_room) || {};
+          document.getElementById('s-rooms').textContent =
+            `desk ${rm.desk || 0} | meeting ${rm.meeting || 0} | lab ${rm.lab || 0} | transit ${rm.transit || 0}`;
+
+          const perMin = (s.events_per_min || 0).toFixed(1);
+          document.getElementById('s-events').textContent =
+            `${s.events_total || 0} total · ${perMin}/min`;
+
+          const build = s.build || {};
+          const sha = build.git_sha ? ` sha ${build.git_sha}` : '';
+          document.getElementById('s-build').textContent =
+            `v${build.version || '?'}${sha} (${build.features || '?'})`;
+
+          const cfgCell = document.getElementById('s-config');
+          clearChildren(cfgCell);
+          cfgCell.appendChild(document.createTextNode(s.config_path || '—'));
+          if (s.config_source && s.config_source !== 'loaded') {
+            const tag = document.createElement('span');
+            const src = String(s.config_source);
+            if (src.includes('corrupt')) {
+              tag.className = 'tag err';
+              tag.textContent = 'corrupt config — replaced';
+            } else if (src.includes('missing')) {
+              tag.className = 'tag dim';
+              tag.textContent = 'used defaults';
+            } else {
+              tag.className = 'tag dim';
+              tag.textContent = src;
+            }
+            cfgCell.appendChild(document.createTextNode(' '));
+            cfgCell.appendChild(tag);
+          } else if (s.config_source === 'loaded') {
+            const tag = document.createElement('span');
+            tag.className = 'tag ok';
+            tag.textContent = 'loaded';
+            cfgCell.appendChild(document.createTextNode(' '));
+            cfgCell.appendChild(tag);
+          }
+
+          const fbLabel = document.getElementById('s-fb-label');
+          const fbCell = document.getElementById('s-fb');
+          if (s.fb_info) {
+            const fb = s.fb_info;
+            fbLabel.hidden = false;
+            fbCell.hidden = false;
+            fbCell.textContent =
+              `${fb.panel_w}×${fb.panel_h} ${fb.bpp}bpp · fits ${fb.scaled_w}×${fb.scaled_h}`;
+          } else {
+            fbLabel.hidden = true;
+            fbCell.hidden = true;
+          }
+        } catch (_e) {
+          if (!offline) {
+            offline = true;
+            document.getElementById('s-uptime').textContent = 'offline — retrying…';
+          }
+        }
+      }
+
+      // ------------------------------------------------------------
+      // Wire up
+      // ------------------------------------------------------------
+      document.getElementById('btn-save').addEventListener('click', save);
+      document.getElementById('btn-reset').addEventListener('click', resetDefaults);
+      document.getElementById('btn-reload').addEventListener('click', reloadConfig);
+      document.getElementById('btn-restart').addEventListener('click', restartService);
+      document.getElementById('banner-close').addEventListener('click', hideBanner);
+
+      window.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+          e.preventDefault();
+          save();
+        } else if (e.key === 'Escape') {
+          hideBanner();
+        }
+      });
+
+      loadAll();
+      pollStatus();
+      setInterval(pollStatus, 1500);
+    </script>
+  </body>
+</html>

@@ -1,8 +1,9 @@
 //! Seed a sims+effects scene, render one frame, write a PNG. Mirrors the
 //! step 4d verification harness; not part of the shipped binary.
 
+use workplacesim::config;
 use workplacesim::render::classify::{classify, Room};
-use workplacesim::render::fx_store::{Footstep, FxStore, Halo, Mote, Tether};
+use workplacesim::render::fx_store::{Footstep, FxLimits, FxStore, Halo, Mote, Tether};
 use workplacesim::render::geometry::Point;
 use workplacesim::render::palette;
 use workplacesim::render::scene;
@@ -148,10 +149,11 @@ fn main() -> anyhow::Result<()> {
 
     let mut frame = RenderFrame::new(RENDER_W, RENDER_H);
     frame.clear(palette::BG);
-    scene::draw_static_background(&mut frame);
-    scene::effects::draw_below(&mut frame, &fx, &store, now_ms);
+    let limits = FxLimits::default();
+    scene::draw_static_background(&mut frame, config::DEFAULT_WINDOW_SPILL_ALPHA);
+    scene::effects::draw_below(&mut frame, &fx, &store, now_ms, &limits);
     scene::sim::draw_sims(&mut frame, &store);
-    scene::effects::draw_above(&mut frame, &fx, &store, now_ms);
+    scene::effects::draw_above(&mut frame, &fx, &store, now_ms, &limits);
 
     let path = std::env::args()
         .nth(1)

@@ -5,6 +5,7 @@
 
 pub mod classify;
 pub mod dirty;
+pub mod fit;
 pub mod fx_store;
 pub mod geometry;
 pub mod palette;
@@ -21,14 +22,16 @@ pub mod desktop;
 #[cfg(feature = "fb")]
 pub mod fb;
 
+pub use fit::{compute_scale_fit, Letterbox, ScaleFit};
+
 pub use classify::{classify, Room, LAB_KEYWORDS};
 pub use geometry::{
-    desk_seats, lab_stations, meeting_seats, DeskSeat, DoorV, LabStation, MeetingSeat,
-    MeetingSide, Point, Rect, Spill, Table, WindowRec, APPROACH_OFFSET_Y, BENCH, CORRIDOR_YS,
-    DESK_COLS, DESK_H, DESK_ROWS, DESK_W, DOOR, HALLWAY_LEFT_X, HALLWAY_RIGHT_X, LAB_DOOR,
-    LAB_QUEUE_SPOTS, LAB_ROOM, LAB_STATION_XS, MEETING_DOOR, MEETING_QUEUE_SPOTS, MEETING_ROOM,
-    NORTH_CORRIDOR_Y, OPEN_ROOM, OUTSIDE_X, QUEUE_SPOTS, SEAT_OFFSET_Y, TABLE, TABLE_NORTH_Y,
-    TABLE_SOUTH_Y, WALL_THICKNESS, WINDOWS, WINDOW_H, WINDOW_W, WORLD_H, WORLD_W,
+    desk_seats, lab_stations, meeting_seats, DeskSeat, DoorV, LabStation, MeetingSeat, MeetingSide,
+    Point, Rect, Spill, Table, WindowRec, APPROACH_OFFSET_Y, BENCH, CORRIDOR_YS, DESK_COLS, DESK_H,
+    DESK_ROWS, DESK_W, DOOR, HALLWAY_LEFT_X, HALLWAY_RIGHT_X, LAB_DOOR, LAB_QUEUE_SPOTS, LAB_ROOM,
+    LAB_STATION_XS, MEETING_DOOR, MEETING_QUEUE_SPOTS, MEETING_ROOM, NORTH_CORRIDOR_Y, OPEN_ROOM,
+    OUTSIDE_X, QUEUE_SPOTS, SEAT_OFFSET_Y, TABLE, TABLE_NORTH_Y, TABLE_SOUTH_Y, WALL_THICKNESS,
+    WINDOWS, WINDOW_H, WINDOW_W, WORLD_H, WORLD_W,
 };
 pub use palette::{
     hash_str, mote_color, sim_colors, Rgb, SimColors, MOTE_COLORS, MOTE_DEFAULT_COLOR, SHIRT_HUES,
@@ -69,9 +72,15 @@ pub fn blend(base: Rgb, over: Rgb, alpha: f32) -> Rgb {
     let a = alpha.clamp(0.0, 1.0);
     let inv = 1.0 - a;
     Rgb(
-        (base.0 as f32 * inv + over.0 as f32 * a).round().clamp(0.0, 255.0) as u8,
-        (base.1 as f32 * inv + over.1 as f32 * a).round().clamp(0.0, 255.0) as u8,
-        (base.2 as f32 * inv + over.2 as f32 * a).round().clamp(0.0, 255.0) as u8,
+        (base.0 as f32 * inv + over.0 as f32 * a)
+            .round()
+            .clamp(0.0, 255.0) as u8,
+        (base.1 as f32 * inv + over.1 as f32 * a)
+            .round()
+            .clamp(0.0, 255.0) as u8,
+        (base.2 as f32 * inv + over.2 as f32 * a)
+            .round()
+            .clamp(0.0, 255.0) as u8,
     )
 }
 
@@ -247,11 +256,7 @@ impl DrawTarget for RenderFrame {
         I: IntoIterator<Item = Pixel<Self::Color>>,
     {
         for Pixel(point, color) in pixels {
-            self.set_pixel(
-                point.x,
-                point.y,
-                Rgb(color.r(), color.g(), color.b()),
-            );
+            self.set_pixel(point.x, point.y, Rgb(color.r(), color.g(), color.b()));
         }
         Ok(())
     }
@@ -332,9 +337,18 @@ mod tests {
 
     #[test]
     fn blend_linear_midpoint() {
-        assert_eq!(blend(Rgb(0, 0, 0), Rgb(100, 100, 100), 0.5), Rgb(50, 50, 50));
-        assert_eq!(blend(Rgb(200, 200, 200), Rgb(0, 0, 0), 0.0), Rgb(200, 200, 200));
-        assert_eq!(blend(Rgb(10, 10, 10), Rgb(20, 20, 20), 1.0), Rgb(20, 20, 20));
+        assert_eq!(
+            blend(Rgb(0, 0, 0), Rgb(100, 100, 100), 0.5),
+            Rgb(50, 50, 50)
+        );
+        assert_eq!(
+            blend(Rgb(200, 200, 200), Rgb(0, 0, 0), 0.0),
+            Rgb(200, 200, 200)
+        );
+        assert_eq!(
+            blend(Rgb(10, 10, 10), Rgb(20, 20, 20), 1.0),
+            Rgb(20, 20, 20)
+        );
     }
 
     #[test]

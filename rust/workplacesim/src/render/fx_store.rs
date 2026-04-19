@@ -15,18 +15,51 @@ use super::palette::{self, Rgb};
 use super::sim_store::{SimState, SimStore};
 use crate::state::Event;
 
-/// Match `public/main.js` constants verbatim.
-pub const FOOTSTEP_LIFETIME_MS: u64 = 900;
-pub const FOOTSTEP_INTERVAL_MS: u64 = 120;
-pub const MOTE_LIFETIME_MS: u64 = 1200;
-pub const MOTE_CAP: usize = 40;
-pub const TETHER_LIFETIME_MS: u64 = 2000;
-pub const HALO_LIFETIME_MS: u64 = 2000;
+// FX lifetimes and caps now live on `Config` (see `crate::config`). Task #2
+// of the Ethereal Thimble plan threads them through each call site so the
+// config website can tune ambient-effect behaviour live. Each API below takes
+// the value it needs as a parameter; the desktop/fb loops snapshot a
+// `FxLimits` from `Config` once per frame and pass it down.
 
-// Step 6: file-touch ticker and bench-flash ring caps.
-pub const FILE_TICK_MS: u64 = 12_000;
-pub const FILE_TICK_CAP: usize = 3;
-pub const BENCH_FLASH_MS: u64 = 800;
+/// Snapshot of config-driven limits for one frame. Copied under a single
+/// short read-lock by the render loop, then passed down to drain/tick/scene
+/// so none of the rendering hot path touches the RwLock directly.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FxLimits {
+    pub footstep_lifetime_ms: u64,
+    pub footstep_interval_ms: u64,
+    pub mote_lifetime_ms: u64,
+    pub mote_cap: usize,
+    pub tether_lifetime_ms: u64,
+    pub halo_lifetime_ms: u64,
+    pub file_tick_ms: u64,
+    pub file_tick_cap: usize,
+    pub bench_flash_ms: u64,
+}
+
+impl FxLimits {
+    /// Build a snapshot from a `Config`. Called once per frame under the
+    /// config read-lock.
+    pub fn from_config(c: &crate::config::Config) -> Self {
+        Self {
+            footstep_lifetime_ms: c.footstep_lifetime_ms,
+            footstep_interval_ms: c.footstep_interval_ms,
+            mote_lifetime_ms: c.mote_lifetime_ms,
+            mote_cap: c.mote_cap,
+            tether_lifetime_ms: c.tether_lifetime_ms,
+            halo_lifetime_ms: c.halo_lifetime_ms,
+            file_tick_ms: c.file_tick_ms,
+            file_tick_cap: c.file_tick_cap,
+            bench_flash_ms: c.bench_flash_ms,
+        }
+    }
+}
+
+impl Default for FxLimits {
+    fn default() -> Self {
+        Self::from_config(&crate::config::Config::default())
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct Footstep {
@@ -107,10 +140,11 @@ impl FxStore {
         rx: &mut broadcast::Receiver<Event>,
         sim_store: &SimStore,
         now_ms: u64,
+        limits: &FxLimits,
     ) {
         loop {
             match rx.try_recv() {
-                Ok(ev) => self.ingest(&ev, sim_store, now_ms),
+                Ok(ev) => self.ingest(&ev, sim_store, now_ms, limits),
                 Err(TryRecvError::Empty) | Err(TryRecvError::Closed) => break,
                 Err(TryRecvError::Lagged(n)) => {
                     tracing::warn!("fx broadcast lagged by {n} events");
@@ -120,14 +154,25 @@ impl FxStore {
         }
     }
 
-    fn ingest(&mut self, event: &Event, sim_store: &SimStore, now_ms: u64) {
+    fn ingest(&mut self, event: &Event, sim_store: &SimStore, now_ms: u64, limits: &FxLimits) {
         match event {
-            Event::Tool { agent_id, tool_name, .. } => {
+            Event::Tool {
+                agent_id,
+                tool_name,
+                ..
+            } => {
                 let Some(sim) = sim_store.anim.get(agent_id) else {
                     return;
                 };
-                if self.motes.len() >= MOTE_CAP {
-                    self.motes.pop_front();
+                while self.motes.len() >= limits.mote_cap {
+                    if self.motes.pop_front().is_none() {
+                        break;
+                    }
+                }
+                // A clamp-bypass mote_cap of 0 is still a valid request;
+                // skip the push so we don't insert only to be popped.
+                if limits.mote_cap == 0 {
+                    return;
                 }
                 self.motes.push_back(Mote {
                     agent_id: agent_id.clone(),
@@ -170,8 +215,13 @@ impl FxStore {
                 if path.is_empty() {
                     return;
                 }
-                if self.file_ticks.len() >= FILE_TICK_CAP {
-                    self.file_ticks.pop_front();
+                while self.file_ticks.len() >= limits.file_tick_cap {
+                    if self.file_ticks.pop_front().is_none() {
+                        break;
+                    }
+                }
+                if limits.file_tick_cap == 0 {
+                    return;
                 }
                 self.file_ticks.push_back(FileTick {
                     path: path.clone(),
@@ -183,8 +233,7 @@ impl FxStore {
                     return;
                 };
                 let idx = nearest_station_idx(sim.x);
-                if let Some(existing) =
-                    self.bench_flashes.iter_mut().find(|b| b.station_idx == idx)
+                if let Some(existing) = self.bench_flashes.iter_mut().find(|b| b.station_idx == idx)
                 {
                     existing.ok = *ok;
                     existing.born_ms = now_ms;
@@ -201,8 +250,8 @@ impl FxStore {
     }
 
     /// Per-frame maintenance: drop expired entries; emit footsteps for sims that
-    /// are walking and haven't dropped one in `FOOTSTEP_INTERVAL_MS`.
-    pub fn tick(&mut self, now_ms: u64, sim_store: &mut SimStore) {
+    /// are walking and haven't dropped one in `limits.footstep_interval_ms`.
+    pub fn tick(&mut self, now_ms: u64, sim_store: &mut SimStore, limits: &FxLimits) {
         // Footsteps from walking sims. SimStore is authoritative; we mutate
         // `last_footstep_ms` on the sim itself so this is naturally idempotent
         // across rapid ticks. `last_footstep_ms == 0` is the never-dropped
@@ -212,7 +261,7 @@ impl FxStore {
                 continue;
             }
             let due = sim.last_footstep_ms == 0
-                || now_ms.saturating_sub(sim.last_footstep_ms) >= FOOTSTEP_INTERVAL_MS;
+                || now_ms.saturating_sub(sim.last_footstep_ms) >= limits.footstep_interval_ms;
             if !due {
                 continue;
             }
@@ -228,27 +277,27 @@ impl FxStore {
 
         // Expire by TTL.
         self.footsteps
-            .retain(|f| now_ms.saturating_sub(f.born_ms) <= FOOTSTEP_LIFETIME_MS);
+            .retain(|f| now_ms.saturating_sub(f.born_ms) <= limits.footstep_lifetime_ms);
         while let Some(front) = self.motes.front() {
-            if now_ms.saturating_sub(front.born_ms) > MOTE_LIFETIME_MS {
+            if now_ms.saturating_sub(front.born_ms) > limits.mote_lifetime_ms {
                 self.motes.pop_front();
             } else {
                 break;
             }
         }
         self.tethers
-            .retain(|t| now_ms.saturating_sub(t.born_ms) <= TETHER_LIFETIME_MS);
+            .retain(|t| now_ms.saturating_sub(t.born_ms) <= limits.tether_lifetime_ms);
         self.halos
-            .retain(|h| now_ms.saturating_sub(h.born_ms) <= HALO_LIFETIME_MS);
+            .retain(|h| now_ms.saturating_sub(h.born_ms) <= limits.halo_lifetime_ms);
         while let Some(front) = self.file_ticks.front() {
-            if now_ms.saturating_sub(front.born_ms) > FILE_TICK_MS {
+            if now_ms.saturating_sub(front.born_ms) > limits.file_tick_ms {
                 self.file_ticks.pop_front();
             } else {
                 break;
             }
         }
         self.bench_flashes
-            .retain(|b| now_ms.saturating_sub(b.born_ms) <= BENCH_FLASH_MS);
+            .retain(|b| now_ms.saturating_sub(b.born_ms) <= limits.bench_flash_ms);
     }
 }
 
@@ -271,10 +320,22 @@ pub fn nearest_station_idx(sim_x: f32) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config;
     use crate::render::classify::Room;
     use crate::render::geometry::Point;
     use crate::render::sim_store::{SimAnim, SimState};
     use crate::state::Agent;
+
+    // Test-local aliases so assertions stay readable after the live consts
+    // moved into `Config`. Values match `Config::default()`.
+    const MOTE_LIFETIME_MS: u64 = config::DEFAULT_MOTE_LIFETIME_MS;
+    const MOTE_CAP: usize = config::DEFAULT_MOTE_CAP;
+    const FILE_TICK_MS: u64 = config::DEFAULT_FILE_TICK_MS;
+    const FILE_TICK_CAP: usize = config::DEFAULT_FILE_TICK_CAP;
+
+    fn limits() -> FxLimits {
+        FxLimits::default()
+    }
 
     fn seed_sim(store: &mut SimStore, id: &str, state: SimState) {
         store.anim.insert(
@@ -317,7 +378,7 @@ mod tests {
             ts: 100,
         })
         .unwrap();
-        fx.drain_events(&mut rx, &store, 100);
+        fx.drain_events(&mut rx, &store, 100, &limits());
         assert_eq!(fx.motes.len(), 1);
         let m = &fx.motes[0];
         assert_eq!(m.color, palette::mote_color("Read"));
@@ -336,7 +397,7 @@ mod tests {
             ts: 100,
         })
         .unwrap();
-        fx.drain_events(&mut rx, &store, 100);
+        fx.drain_events(&mut rx, &store, 100, &limits());
         assert!(fx.motes.is_empty());
     }
 
@@ -354,7 +415,7 @@ mod tests {
             })
             .unwrap();
         }
-        fx.drain_events(&mut rx, &store, 1_000);
+        fx.drain_events(&mut rx, &store, 1_000, &limits());
         assert_eq!(fx.motes.len(), MOTE_CAP);
     }
 
@@ -370,9 +431,9 @@ mod tests {
             ts: 0,
         })
         .unwrap();
-        fx.drain_events(&mut rx, &store, 0);
+        fx.drain_events(&mut rx, &store, 0, &limits());
         assert_eq!(fx.motes.len(), 1);
-        fx.tick(MOTE_LIFETIME_MS + 1, &mut store);
+        fx.tick(MOTE_LIFETIME_MS + 1, &mut store, &limits());
         assert!(fx.motes.is_empty());
     }
 
@@ -383,7 +444,7 @@ mod tests {
         let mut fx = FxStore::new();
         // t = 0, 120, 240, 360, 480 → five footsteps over 600 ms.
         for t in (0..600).step_by(60) {
-            fx.tick(t, &mut store);
+            fx.tick(t, &mut store, &limits());
         }
         assert_eq!(fx.footsteps.len(), 5);
     }
@@ -394,7 +455,7 @@ mod tests {
         seed_sim(&mut store, "a1", SimState::Seated);
         let mut fx = FxStore::new();
         for t in (0..1_000).step_by(60) {
-            fx.tick(t, &mut store);
+            fx.tick(t, &mut store, &limits());
         }
         assert!(fx.footsteps.is_empty());
     }
@@ -410,14 +471,14 @@ mod tests {
             message: "oops".into(),
         })
         .unwrap();
-        fx.drain_events(&mut rx, &store, 100);
+        fx.drain_events(&mut rx, &store, 100, &limits());
         tx.send(Event::ToolError {
             agent_id: "a1".into(),
             tool_name: "Bash".into(),
             message: "oops again".into(),
         })
         .unwrap();
-        fx.drain_events(&mut rx, &store, 800);
+        fx.drain_events(&mut rx, &store, 800, &limits());
         assert_eq!(fx.halos.len(), 1);
         assert_eq!(fx.halos[0].born_ms, 800);
     }
@@ -459,7 +520,7 @@ mod tests {
         })
         .unwrap();
 
-        fx.drain_events(&mut rx, &store, 100);
+        fx.drain_events(&mut rx, &store, 100, &limits());
         assert_eq!(fx.tethers.len(), 1);
         assert_eq!(fx.tethers[0].parent, "parent-sid");
         assert_eq!(fx.tethers[0].child, "child-1");
@@ -477,7 +538,7 @@ mod tests {
             })
             .unwrap();
         }
-        fx.drain_events(&mut rx, &store, 0);
+        fx.drain_events(&mut rx, &store, 0, &limits());
         assert_eq!(fx.file_ticks.len(), FILE_TICK_CAP);
         // Oldest dropped; newest retained.
         assert_eq!(fx.file_ticks.front().unwrap().path, "src/f2.rs");
@@ -494,10 +555,10 @@ mod tests {
             path: "src/x.rs".into(),
         })
         .unwrap();
-        fx.drain_events(&mut rx, &store, 0);
-        fx.tick(FILE_TICK_MS, &mut store);
+        fx.drain_events(&mut rx, &store, 0, &limits());
+        fx.tick(FILE_TICK_MS, &mut store, &limits());
         assert_eq!(fx.file_ticks.len(), 1);
-        fx.tick(FILE_TICK_MS + 1, &mut store);
+        fx.tick(FILE_TICK_MS + 1, &mut store, &limits());
         assert!(fx.file_ticks.is_empty());
     }
 
@@ -535,7 +596,7 @@ mod tests {
             ok: true,
         })
         .unwrap();
-        fx.drain_events(&mut rx, &store, 100);
+        fx.drain_events(&mut rx, &store, 100, &limits());
         assert_eq!(fx.bench_flashes.len(), 1);
         // Same station, different outcome: should refresh, not stack.
         tx.send(Event::BashResult {
@@ -543,7 +604,7 @@ mod tests {
             ok: false,
         })
         .unwrap();
-        fx.drain_events(&mut rx, &store, 400);
+        fx.drain_events(&mut rx, &store, 400, &limits());
         assert_eq!(fx.bench_flashes.len(), 1);
         assert!(!fx.bench_flashes[0].ok);
         assert_eq!(fx.bench_flashes[0].born_ms, 400);
@@ -574,7 +635,7 @@ mod tests {
         }
         // Should not panic; the lag warning is logged and the surviving events
         // are drained.
-        fx.drain_events(&mut rx, &store, 100);
+        fx.drain_events(&mut rx, &store, 100, &limits());
         // Some events made it through; we don't pin the exact count since the
         // broadcast eviction policy is implementation-defined when overrun.
         assert!(fx.motes.len() <= MOTE_CAP);

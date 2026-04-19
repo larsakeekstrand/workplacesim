@@ -1,6 +1,7 @@
 //! Seed a known 3-sim scene into a `SimStore`, render one frame, write PNG.
 //! Matches the step 4b verification harness; not part of the shipped binary.
 
+use workplacesim::config;
 use workplacesim::render::classify::{classify, Room};
 use workplacesim::render::geometry::Point;
 use workplacesim::render::palette;
@@ -101,7 +102,7 @@ fn main() -> anyhow::Result<()> {
 
     let mut frame = RenderFrame::new(RENDER_W, RENDER_H);
     frame.clear(palette::BG);
-    scene::draw_static_background(&mut frame);
+    scene::draw_static_background(&mut frame, config::DEFAULT_WINDOW_SPILL_ALPHA);
     scene::sim::draw_sims(&mut frame, &store);
 
     let path = std::env::args()

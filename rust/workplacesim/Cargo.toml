@@ -23,6 +23,7 @@ ahash = "0.8"
 parking_lot = "0.12"
 embedded-graphics = "0.8"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+dirs = "5"
 minifb = { version = "0.27", optional = true }
 image = { version = "0.25", default-features = false, features = ["png"], optional = true }
 
@@ -52,6 +53,7 @@ codegen-units = 1
 tokio = { version = "1", features = ["sync", "rt", "rt-multi-thread", "macros", "time", "test-util", "net", "signal"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 proptest = "1"
+tempfile = "3"
 
 # Limit the dump_bg binary to the desktop feature so the fb (Pi) build path
 # doesn't drag in image/png.

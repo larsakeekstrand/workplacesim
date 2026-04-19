@@ -3,8 +3,8 @@
 //! to the 640x360 render frame.
 
 use super::super::geometry::{
-    desk_seats, lab_stations, meeting_seats, DeskSeat, LabStation, MeetingSeat, MeetingSide,
-    Rect, BENCH, DESK_H, DESK_W, LAB_ROOM, LAB_STATION_XS, MEETING_ROOM, TABLE,
+    desk_seats, lab_stations, meeting_seats, DeskSeat, LabStation, MeetingSeat, MeetingSide, Rect,
+    BENCH, DESK_H, DESK_W, LAB_ROOM, LAB_STATION_XS, MEETING_ROOM, TABLE,
 };
 use super::super::palette;
 use super::super::Framebuffer;
@@ -152,10 +152,7 @@ pub fn draw_lab_room(fb: &mut impl Framebuffer) {
 
     // Workbench on north interior wall.
     let b = hr(BENCH);
-    fb.fill_rect(
-        Rect::new(b.x, b.y + b.h - 3, b.w, 3),
-        palette::BENCH_SHADE,
-    );
+    fb.fill_rect(Rect::new(b.x, b.y + b.h - 3, b.w, 3), palette::BENCH_SHADE);
     fb.fill_rect(Rect::new(b.x, b.y, b.w, b.h - 2), palette::BENCH_TOP);
     fb.stroke_rect(Rect::new(b.x, b.y, b.w, b.h - 2), palette::BENCH_EDGE);
 
@@ -179,10 +176,7 @@ fn draw_lab_station(fb: &mut impl Framebuffer, cx_js: i32, by_js: i32) {
     fb.fill_rect(Rect::new(mx - 1, my - 1, mw + 2, mh + 2), palette::WALL);
     fb.fill_rect(Rect::new(mx, my, mw, mh), palette::MONITOR);
     // Green test-output fill.
-    fb.fill_rect(
-        Rect::new(mx + 1, my + 1, mw - 2, mh - 2),
-        palette::SCOPE,
-    );
+    fb.fill_rect(Rect::new(mx + 1, my + 1, mw - 2, mh - 2), palette::SCOPE);
     // A few SCOPE_TRACE scanlines for the "terminal log" look.
     for off in [1i32, 3, 5] {
         let y = my + 1 + off;

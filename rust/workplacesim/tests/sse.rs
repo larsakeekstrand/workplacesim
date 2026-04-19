@@ -6,18 +6,19 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
 use serde_json::json;
+use workplacesim::config::{self, Config};
+use workplacesim::server::AppState;
 use workplacesim::{server, state};
 
 async fn start_server() -> (SocketAddr, server::Shared, tokio::task::JoinHandle<()>) {
-    let (shared, _rx) = state::new_state();
-    let listener = tokio::net::TcpListener::bind(SocketAddr::new(
-        IpAddr::V4(Ipv4Addr::LOCALHOST),
-        0,
-    ))
-    .await
-    .unwrap();
+    let cfg = config::shared(Config::default());
+    let (shared, _rx) = state::new_state(cfg.clone());
+    let listener =
+        tokio::net::TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
+            .await
+            .unwrap();
     let addr = listener.local_addr().unwrap();
-    let app = server::build_router(shared.clone());
+    let app = server::build_router(AppState::for_tests(shared.clone(), cfg));
     let handle = tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;
     });
@@ -55,7 +56,11 @@ async fn events_emits_initial_snapshot() {
         .build()
         .unwrap();
 
-    let resp = client.get(format!("http://{addr}/events")).send().await.unwrap();
+    let resp = client
+        .get(format!("http://{addr}/events"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     assert_eq!(
         resp.headers()
@@ -120,9 +125,18 @@ async fn events_streams_start_after_subscribe() {
         .unwrap();
 
     let body = read_until(resp, "\"type\":\"start\"", 8192).await;
-    assert!(body.starts_with("data: {\"type\":\"snapshot\""), "body={body:?}");
-    assert!(body.contains("\"type\":\"start\""), "expected start event in body, got {body:?}");
-    assert!(body.contains("\"agent_id\":\"a1\""), "start payload should carry agent_id, got {body:?}");
+    assert!(
+        body.starts_with("data: {\"type\":\"snapshot\""),
+        "body={body:?}"
+    );
+    assert!(
+        body.contains("\"type\":\"start\""),
+        "expected start event in body, got {body:?}"
+    );
+    assert!(
+        body.contains("\"agent_id\":\"a1\""),
+        "start payload should carry agent_id, got {body:?}"
+    );
 
     handle.abort();
 }
@@ -182,7 +196,10 @@ async fn events_resyncs_on_lag() {
     // hard to force deterministically without slowing the reader; what we
     // really care about is the stream not closing on lag. Assert we read
     // a nonzero suffix.
-    assert!(body.len() > 100, "stream closed early on lag, body={body:?}");
+    assert!(
+        body.len() > 100,
+        "stream closed early on lag, body={body:?}"
+    );
 
     handle.abort();
 }

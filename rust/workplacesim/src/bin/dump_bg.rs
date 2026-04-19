@@ -1,11 +1,12 @@
 //! Render the static scene background once and write a PNG for visual QA.
 //! Used by the step 4a verification script; not part of the shipped binary.
 
+use workplacesim::config;
 use workplacesim::render::{scene, RenderFrame, RENDER_H, RENDER_W};
 
 fn main() -> anyhow::Result<()> {
     let mut frame = RenderFrame::new(RENDER_W, RENDER_H);
-    scene::draw_static_background(&mut frame);
+    scene::draw_static_background(&mut frame, config::DEFAULT_WINDOW_SPILL_ALPHA);
 
     let path = std::env::args()
         .nth(1)

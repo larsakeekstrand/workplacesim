@@ -51,8 +51,11 @@ impl RenderWorld {
     /// present records so the renderer can animate them walking out during
     /// their `STOP_GRACE` window.
     pub fn from_state(state: &State, now_ms: u64) -> Self {
-        let mut agents: Vec<AgentView> =
-            state.list_all_including_finished().iter().map(AgentView::from).collect();
+        let mut agents: Vec<AgentView> = state
+            .list_all_including_finished()
+            .iter()
+            .map(AgentView::from)
+            .collect();
         agents.sort_by(|a, b| {
             a.started_at
                 .cmp(&b.started_at)

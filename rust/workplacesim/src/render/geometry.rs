@@ -221,8 +221,14 @@ pub const WINDOWS: [WindowRec; 9] = [
 pub const QUEUE_SPOTS: [Point; 4] = [
     Point::new(OPEN_ROOM.x + OPEN_ROOM.w - 48, OPEN_ROOM.y + 48),
     Point::new(OPEN_ROOM.x + OPEN_ROOM.w - 48, OPEN_ROOM.y + 108),
-    Point::new(OPEN_ROOM.x + OPEN_ROOM.w - 48, OPEN_ROOM.y + OPEN_ROOM.h - 100),
-    Point::new(OPEN_ROOM.x + OPEN_ROOM.w - 48, OPEN_ROOM.y + OPEN_ROOM.h - 40),
+    Point::new(
+        OPEN_ROOM.x + OPEN_ROOM.w - 48,
+        OPEN_ROOM.y + OPEN_ROOM.h - 100,
+    ),
+    Point::new(
+        OPEN_ROOM.x + OPEN_ROOM.w - 48,
+        OPEN_ROOM.y + OPEN_ROOM.h - 40,
+    ),
 ];
 
 pub const MEETING_QUEUE_SPOTS: [Point; 2] = [
@@ -385,8 +391,14 @@ mod tests {
         const _: () = assert!(HALLWAY_RIGHT_X < OPEN_ROOM.right());
         // Desk columns sit between the two halls.
         for &c in &DESK_COLS {
-            assert!(HALLWAY_LEFT_X < c, "desk col {c} not east of HALLWAY_LEFT_X");
-            assert!(c < HALLWAY_RIGHT_X, "desk col {c} not west of HALLWAY_RIGHT_X");
+            assert!(
+                HALLWAY_LEFT_X < c,
+                "desk col {c} not east of HALLWAY_LEFT_X"
+            );
+            assert!(
+                c < HALLWAY_RIGHT_X,
+                "desk col {c} not west of HALLWAY_RIGHT_X"
+            );
         }
     }
 

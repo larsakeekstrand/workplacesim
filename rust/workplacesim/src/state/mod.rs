@@ -11,8 +11,8 @@
 //! Time is injected: every method that needs "now" takes `now_ms: u64`.
 //! Tests pass deterministic values; production callers use `clock::now_ms()`.
 
+use std::collections::VecDeque;
 use std::sync::Arc;
-use std::time::Duration;
 
 use indexmap::IndexMap;
 use parking_lot::RwLock;
@@ -31,13 +31,9 @@ pub use payloads::{
     VisitRoom,
 };
 
+use crate::config::SharedConfig;
 use pending::PendingDescription;
 
-const PENDING_TTL: Duration = Duration::from_secs(60);
-const STOP_GRACE: Duration = Duration::from_secs(10);
-const VISIT_MIN: Duration = Duration::from_secs(1);
-const VISIT_MAX: Duration = Duration::from_secs(120);
-const VISIT_DEFAULT: Duration = Duration::from_secs(20);
 const ERROR_PREVIEW_LEN: usize = 80;
 const PROMPT_PREVIEW_LEN: usize = 80;
 
@@ -46,6 +42,13 @@ const VALID_ROOMS: &[&str] = &["test", "meeting", "desk"];
 /// Capacity for the broadcast channel. Subscribers that lag by more than this
 /// many messages see `RecvError::Lagged` and can resync via a snapshot event.
 const BROADCAST_CAP: usize = 256;
+
+/// Window over which `events_per_min()` averages. Keep a little more history
+/// than the 60-second query window so trimming doesn't race with reads.
+const EVENT_HISTORY_MS: u64 = 5 * 60_000;
+/// Hard upper bound on the ring buffer so a runaway scene can't grow state
+/// without bound. `events_per_min` caps at ~600 events/sec under this cap.
+const EVENT_HISTORY_CAP: usize = 200_000;
 
 pub struct State {
     // IndexMap preserves insertion order; `stop_agent`'s FIFO fallback needs it
@@ -60,17 +63,33 @@ pub struct State {
     pending_stops: IndexMap<String, u64>,
 
     tx: broadcast::Sender<Event>,
+
+    /// Shared runtime config; read each tick/visit/stop with a short-lived
+    /// RwLock read. Cloning the Arc is cheap, so tests hand in their own.
+    config: SharedConfig,
+
+    /// Lifetime count of broadcast events emitted since `new_state`. Surfaced
+    /// on `/api/status` alongside `events_per_min`.
+    events_total: u64,
+
+    /// Rolling timestamps (ms) of recent events, newest at the back. Used by
+    /// `events_per_min()` to compute an average over the last 60 s. Older
+    /// entries are trimmed on every push; see `EVENT_HISTORY_MS`.
+    recent_event_ts: VecDeque<u64>,
 }
 
 /// Construct a fresh State wrapped in Arc<RwLock>, plus a subscribed receiver
 /// so the caller doesn't race with the first emitted event.
-pub fn new_state() -> (Arc<RwLock<State>>, broadcast::Receiver<Event>) {
+pub fn new_state(config: SharedConfig) -> (Arc<RwLock<State>>, broadcast::Receiver<Event>) {
     let (tx, rx) = broadcast::channel(BROADCAST_CAP);
     let state = State {
         active_agents: IndexMap::new(),
         pending_descriptions: IndexMap::new(),
         pending_stops: IndexMap::new(),
         tx,
+        config,
+        events_total: 0,
+        recent_event_ts: VecDeque::new(),
     };
     (Arc::new(RwLock::new(state)), rx)
 }
@@ -82,10 +101,51 @@ impl State {
         self.tx.subscribe()
     }
 
-    fn emit(&self, event: Event) {
+    fn emit(&mut self, event: Event) {
         // broadcast::Sender::send errors only when there are zero active
         // receivers. That's fine — events are fire-and-forget.
+        self.events_total = self.events_total.saturating_add(1);
+        let now_ms = clock::now_ms();
+        self.recent_event_ts.push_back(now_ms);
+        self.trim_event_history(now_ms);
         let _ = self.tx.send(event);
+    }
+
+    fn trim_event_history(&mut self, now_ms: u64) {
+        let cutoff = now_ms.saturating_sub(EVENT_HISTORY_MS);
+        while let Some(front) = self.recent_event_ts.front() {
+            if *front < cutoff {
+                self.recent_event_ts.pop_front();
+            } else {
+                break;
+            }
+        }
+        // Safety cap to prevent unbounded growth under pathological event rates.
+        while self.recent_event_ts.len() > EVENT_HISTORY_CAP {
+            self.recent_event_ts.pop_front();
+        }
+    }
+
+    /// Total count of broadcast events emitted since this `State` was created.
+    /// Monotonic, saturating. Surfaced on `/api/status`.
+    pub fn events_total(&self) -> u64 {
+        self.events_total
+    }
+
+    /// Average events per minute over the last 60 s. Computed from the
+    /// `recent_event_ts` ring buffer; returns 0.0 when the window is empty.
+    pub fn events_per_min(&self) -> f64 {
+        let now_ms = clock::now_ms();
+        let window_start = now_ms.saturating_sub(60_000);
+        let n = self
+            .recent_event_ts
+            .iter()
+            .rev()
+            .take_while(|ts| **ts >= window_start)
+            .count();
+        // Exact per-minute rate over the last 60 s. Since we already bound the
+        // window to 60 s, the count IS the events/min.
+        n as f64
     }
 
     pub fn list_active(&self) -> Vec<Agent> {
@@ -136,7 +196,8 @@ impl State {
         let Some(entry) = self.pending_descriptions.shift_remove(&key) else {
             return String::new();
         };
-        if now_ms.saturating_sub(entry.ts) > PENDING_TTL.as_millis() as u64 {
+        let pending_ttl = self.config.read().pending_ttl_ms;
+        if now_ms.saturating_sub(entry.ts) > pending_ttl {
             return String::new();
         }
         entry.description
@@ -153,8 +214,7 @@ impl State {
         let description = if let Some(d) = p.description.as_deref().filter(|s| !s.is_empty()) {
             d.to_string()
         } else {
-            let from_pending =
-                self.consume_description(&p.session_id, &p.agent_type, now_ms);
+            let from_pending = self.consume_description(&p.session_id, &p.agent_type, now_ms);
             if !from_pending.is_empty() {
                 from_pending
             } else if let Some(t) = p.agent_type.as_deref().filter(|s| !s.is_empty()) {
@@ -167,9 +227,15 @@ impl State {
         let record = Agent {
             agent_id: p.agent_id.clone(),
             session_id: p.session_id,
-            agent_type: p.agent_type.filter(|s| !s.is_empty()).unwrap_or_else(|| "agent".to_string()),
+            agent_type: p
+                .agent_type
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "agent".to_string()),
             description,
-            user: p.user.filter(|s| !s.is_empty()).unwrap_or_else(|| "unknown".to_string()),
+            user: p
+                .user
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "unknown".to_string()),
             host: p.host.unwrap_or_default(),
             cwd: p.cwd.unwrap_or_default(),
             permission_mode: p
@@ -226,8 +292,8 @@ impl State {
         self.emit(Event::Stop {
             agent_id: id.clone(),
         });
-        self.pending_stops
-            .insert(id, now_ms + STOP_GRACE.as_millis() as u64);
+        let stop_grace = self.config.read().stop_grace_ms;
+        self.pending_stops.insert(id, now_ms + stop_grace);
         Some(snapshot)
     }
 
@@ -317,13 +383,15 @@ impl State {
         }
         let room = room.to_string();
 
+        let (visit_default, visit_min, visit_max) = {
+            let c = self.config.read();
+            (c.visit_default_ms, c.visit_min_ms, c.visit_max_ms)
+        };
         let ttl_ms = match p.ttl_ms {
             Some(v) if v > 0 => v,
-            _ => VISIT_DEFAULT.as_millis() as u64,
+            _ => visit_default,
         };
-        let ttl_ms = ttl_ms
-            .max(VISIT_MIN.as_millis() as u64)
-            .min(VISIT_MAX.as_millis() as u64);
+        let ttl_ms = ttl_ms.max(visit_min).min(visit_max);
 
         let id = self.find_record_id(&p.agent_id, &p.session_id)?;
         self.check_permission_mode(&id, &p.permission_mode);
@@ -467,7 +535,8 @@ impl State {
         }
 
         // 2. Pending-description sweep.
-        let pending_cutoff = now_ms.saturating_sub(PENDING_TTL.as_millis() as u64);
+        let pending_ttl = self.config.read().pending_ttl_ms;
+        let pending_cutoff = now_ms.saturating_sub(pending_ttl);
         self.pending_descriptions
             .retain(|_, entry| entry.ts >= pending_cutoff);
 
@@ -475,7 +544,13 @@ impl State {
         let finalised: Vec<String> = self
             .pending_stops
             .iter()
-            .filter_map(|(id, deadline)| if now_ms >= *deadline { Some(id.clone()) } else { None })
+            .filter_map(|(id, deadline)| {
+                if now_ms >= *deadline {
+                    Some(id.clone())
+                } else {
+                    None
+                }
+            })
             .collect();
         for id in finalised {
             self.pending_stops.shift_remove(&id);
@@ -487,7 +562,17 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{self, Config};
     use tokio::sync::broadcast::error::TryRecvError;
+
+    // Test-side aliases so call sites stay readable after the live consts
+    // moved into `Config`. Values match the defaults in `Config::default()`
+    // so the old expected-TTL assertions still hold.
+    const PENDING_TTL_MS: u64 = config::DEFAULT_PENDING_TTL_MS;
+    const STOP_GRACE_MS: u64 = config::DEFAULT_STOP_GRACE_MS;
+    const VISIT_MIN_MS: u64 = config::DEFAULT_VISIT_MIN_MS;
+    const VISIT_MAX_MS: u64 = config::DEFAULT_VISIT_MAX_MS;
+    const VISIT_DEFAULT_MS: u64 = config::DEFAULT_VISIT_DEFAULT_MS;
 
     fn setup() -> (State, broadcast::Receiver<Event>) {
         let (tx, rx) = broadcast::channel(BROADCAST_CAP);
@@ -496,6 +581,9 @@ mod tests {
             pending_descriptions: IndexMap::new(),
             pending_stops: IndexMap::new(),
             tx,
+            config: config::shared(Config::default()),
+            events_total: 0,
+            recent_event_ts: VecDeque::new(),
         };
         (state, rx)
     }
@@ -601,7 +689,7 @@ mod tests {
             0,
         );
         // Start past PENDING_TTL; entry should be consumed but return empty.
-        let start_ms = PENDING_TTL.as_millis() as u64 + 1_000;
+        let start_ms = PENDING_TTL_MS + 1_000;
         s.start_agent(
             StartAgent {
                 agent_id: "a1".into(),
@@ -647,7 +735,7 @@ mod tests {
         // Stop recorded with deadline.
         assert_eq!(
             s.pending_stops.get("a1").copied(),
-            Some(2_000 + STOP_GRACE.as_millis() as u64)
+            Some(2_000 + STOP_GRACE_MS)
         );
         let events = drain(&mut rx);
         assert_eq!(events.len(), 1);
@@ -711,10 +799,13 @@ mod tests {
             0,
         );
         let _ = drain(&mut rx);
-        let grace_ms = STOP_GRACE.as_millis() as u64;
+        let grace_ms = STOP_GRACE_MS;
 
         s.tick(grace_ms - 1);
-        assert!(s.active_agents.contains_key("a1"), "still present before grace");
+        assert!(
+            s.active_agents.contains_key("a1"),
+            "still present before grace"
+        );
         s.tick(grace_ms + 1);
         assert!(!s.active_agents.contains_key("a1"), "removed after grace");
         assert!(!s.pending_stops.contains_key("a1"));
@@ -779,7 +870,7 @@ mod tests {
         );
         {
             let visit = s.active_agents["a1"].visit.clone().unwrap();
-            assert_eq!(visit.until, 1_000 + VISIT_MIN.as_millis() as u64);
+            assert_eq!(visit.until, 1_000 + VISIT_MIN_MS);
         }
 
         // Clear then retry with huge ttl.
@@ -795,7 +886,7 @@ mod tests {
         );
         {
             let visit = s.active_agents["a1"].visit.clone().unwrap();
-            assert_eq!(visit.until, 2_000 + VISIT_MAX.as_millis() as u64);
+            assert_eq!(visit.until, 2_000 + VISIT_MAX_MS);
         }
 
         // Missing ttl → default 20s.
@@ -811,7 +902,7 @@ mod tests {
         );
         {
             let visit = s.active_agents["a1"].visit.clone().unwrap();
-            assert_eq!(visit.until, 3_000 + VISIT_DEFAULT.as_millis() as u64);
+            assert_eq!(visit.until, 3_000 + VISIT_DEFAULT_MS);
         }
 
         // Drain events; presence already asserted above.
@@ -879,7 +970,9 @@ mod tests {
         assert!(s.active_agents["a1"].visit.is_none());
         let events = drain(&mut rx);
         assert_eq!(events.len(), 1);
-        assert!(matches!(&events[0], Event::Visit { room: None, until: None, agent_id } if agent_id == "a1"));
+        assert!(
+            matches!(&events[0], Event::Visit { room: None, until: None, agent_id } if agent_id == "a1")
+        );
     }
 
     #[test]
@@ -899,7 +992,9 @@ mod tests {
         assert_eq!(s.active_agents["a1"].permission_mode, "plan");
         let events = drain(&mut rx);
         assert_eq!(events.len(), 2);
-        assert!(matches!(&events[0], Event::Reclassify { permission_mode, .. } if permission_mode == "plan"));
+        assert!(
+            matches!(&events[0], Event::Reclassify { permission_mode, .. } if permission_mode == "plan")
+        );
         assert!(matches!(&events[1], Event::Tool { .. }));
     }
 
@@ -958,7 +1053,10 @@ mod tests {
         let events = drain(&mut rx);
         assert_eq!(events.len(), 2);
         match &events[0] {
-            Event::Idle { idle: false, agent_id } => assert_eq!(agent_id, "a1"),
+            Event::Idle {
+                idle: false,
+                agent_id,
+            } => assert_eq!(agent_id, "a1"),
             other => panic!("expected Idle(false), got {other:?}"),
         }
         match &events[1] {
@@ -969,7 +1067,10 @@ mod tests {
             other => panic!("expected Prompt, got {other:?}"),
         }
         assert_eq!(s.active_agents["a1"].idle, Some(false));
-        assert_eq!(s.active_agents["a1"].session_prompt.as_ref().unwrap().len(), 80);
+        assert_eq!(
+            s.active_agents["a1"].session_prompt.as_ref().unwrap().len(),
+            80
+        );
     }
 
     #[test]
@@ -1049,7 +1150,9 @@ mod tests {
         let events = drain(&mut rx);
         assert_eq!(events.len(), 1);
         match &events[0] {
-            Event::ToolError { message, tool_name, .. } => {
+            Event::ToolError {
+                message, tool_name, ..
+            } => {
                 assert_eq!(message.len(), 80);
                 assert_eq!(tool_name, "Bash");
             }
@@ -1135,9 +1238,9 @@ mod tests {
             },
             0,
         );
-        s.tick(PENDING_TTL.as_millis() as u64 - 1);
+        s.tick(PENDING_TTL_MS - 1);
         assert_eq!(s.pending_descriptions.len(), 1);
-        s.tick(PENDING_TTL.as_millis() as u64 + 1);
+        s.tick(PENDING_TTL_MS + 1);
         assert!(s.pending_descriptions.is_empty());
     }
 

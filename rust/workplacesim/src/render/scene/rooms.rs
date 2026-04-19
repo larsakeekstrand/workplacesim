@@ -23,7 +23,11 @@ pub fn draw_floor(fb: &mut impl Framebuffer) {
         let mut x = r.x;
         while x < r.x + r.w {
             let odd = ((y - r.y) / tile_h + (x - r.x) / tile_w) & 1;
-            let c = if odd == 1 { palette::FLOOR_A } else { palette::FLOOR_B };
+            let c = if odd == 1 {
+                palette::FLOOR_A
+            } else {
+                palette::FLOOR_B
+            };
             fb.fill_rect(Rect::new(x, y, tile_w, tile_h), c);
             x += tile_w;
         }
@@ -99,10 +103,7 @@ pub fn draw_walls(fb: &mut impl Framebuffer) {
     let r = hr(OPEN_ROOM);
     let door_y = h(DOOR.y);
     let door_h = h(DOOR.h);
-    fb.fill_rect(
-        Rect::new(r.x - t, door_y, t, door_h),
-        palette::BG,
-    );
+    fb.fill_rect(Rect::new(r.x - t, door_y, t, door_h), palette::BG);
 
     // Interior doors to MEETING / LAB punch through the partition strip
     // between OPEN_ROOM and the right column.
@@ -133,20 +134,24 @@ fn punch_inner_door(fb: &mut impl Framebuffer, door: DoorV, t: i32) {
     fb.fill_rect(Rect::new(inner_gap_x, dy, total_span, dh), palette::BG);
 }
 
-pub fn draw_windows(fb: &mut impl Framebuffer) {
+pub fn draw_windows(fb: &mut impl Framebuffer, spill_alpha: f32) {
     // Two passes: first the light-spill trapezoids so walls and later furniture
     // paint over them. JS does spill *before* frame/glass — we do the same.
     // TODO(step 6): EMA-modulated spill alpha driven by recent-event rate
     //   (see WINDOW_SPILL_BASE_ALPHA / WINDOW_SPILL_PEAK_ALPHA in main.js).
     for w in &WINDOWS {
-        draw_window_spill(fb, w);
+        draw_window_spill(fb, w, spill_alpha);
     }
     for w in &WINDOWS {
         draw_window_frame(fb, w);
     }
 }
 
-fn draw_window_spill(fb: &mut impl Framebuffer, w: &super::super::geometry::WindowRec) {
+fn draw_window_spill(
+    fb: &mut impl Framebuffer,
+    w: &super::super::geometry::WindowRec,
+    spill_alpha: f32,
+) {
     // Trapezoid: narrow edge at the wall, wide edge 10 render-px into the
     // room (JS uses depth=20 pre-halve). Painted as blended horizontal lines.
     let edge_y = h(w.room_edge_y);
@@ -175,7 +180,7 @@ fn draw_window_spill(fb: &mut impl Framebuffer, w: &super::super::geometry::Wind
         let xa = cx - half;
         let xb = cx + half;
         for x in xa..=xb {
-            fb.set_pixel(x, y, tinted_floor(x, y));
+            fb.set_pixel(x, y, tinted_floor(x, y, spill_alpha));
         }
     }
 }
@@ -185,9 +190,9 @@ fn draw_window_spill(fb: &mut impl Framebuffer, w: &super::super::geometry::Wind
 /// Avoids a `get_pixel` trait method while preserving the "blue wash on the
 /// floor near a window" look. Draw order puts spills before walls/furniture,
 /// so nothing has been painted there yet anyway.
-fn tinted_floor(x: i32, y: i32) -> Rgb {
+fn tinted_floor(x: i32, y: i32, spill_alpha: f32) -> Rgb {
     let base = pick_floor(x, y);
-    blend(base, palette::WINDOW_GLASS, palette::WINDOW_SPILL_ALPHA)
+    blend(base, palette::WINDOW_GLASS, spill_alpha)
 }
 
 fn pick_floor(x: i32, y: i32) -> Rgb {

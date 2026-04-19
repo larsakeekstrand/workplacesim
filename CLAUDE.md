@@ -29,7 +29,10 @@ whiteboard) react to every tool call and lifecycle signal.
   one of `--features desktop` (Mac window) or `--features fb` (Linux
   framebuffer, Pi). Deploy via `rust/workplacesim/deploy/install.sh
   pi@host`. Hooks on the Mac point at the Pi via
-  `WORKPLACESIM_URL=http://<pi>:4317`.
+  `WORKPLACESIM_URL=http://<pi>:4317`. Live tuning via `/config`
+  (browser), backed by a JSON file resolved from
+  `$WORKPLACESIM_CONFIG_PATH` → `$XDG_CONFIG_HOME/workplacesim/config.json`
+  → `./workplacesim-config.json`.
 
 ## Layout
 

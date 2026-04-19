@@ -4,9 +4,7 @@
 //! the `SimAnim` contract); we halve at draw time the same way `scene::sim`
 //! does.
 
-use super::super::fx_store::{
-    FxStore, FOOTSTEP_LIFETIME_MS, HALO_LIFETIME_MS, MOTE_LIFETIME_MS, TETHER_LIFETIME_MS,
-};
+use super::super::fx_store::{FxLimits, FxStore};
 use super::super::geometry::Point;
 use super::super::palette::Rgb;
 use super::super::sim_store::SimStore;
@@ -18,22 +16,40 @@ const HALO_COLOR: Rgb = Rgb(0xff, 0x64, 0x64);
 /// Painted under sims so a body occludes the trail beneath its feet, matching
 /// the JS `effects` Graphics depth (it sits below sim sprites). Tethers go
 /// here too so a parent body draws over the line stub at its anchor.
-pub fn draw_below(fb: &mut RenderFrame, fx: &FxStore, sim_store: &SimStore, now_ms: u64) {
-    draw_footsteps(fb, fx, now_ms);
-    draw_tethers(fb, fx, sim_store, now_ms);
+///
+/// `limits` is the per-frame snapshot of config lifetimes — the draw code
+/// maps each entry's age to alpha using the matching `*_lifetime_ms` field.
+pub fn draw_below(
+    fb: &mut RenderFrame,
+    fx: &FxStore,
+    sim_store: &SimStore,
+    now_ms: u64,
+    limits: &FxLimits,
+) {
+    draw_footsteps(fb, fx, now_ms, limits);
+    draw_tethers(fb, fx, sim_store, now_ms, limits);
 }
 
 /// Painted on top of sims — motes float above heads, halos ring the body.
 /// JS uses Phaser depth ordering for the same effect.
-pub fn draw_above(fb: &mut RenderFrame, fx: &FxStore, sim_store: &SimStore, now_ms: u64) {
-    draw_motes(fb, fx, now_ms);
-    draw_halos(fb, fx, sim_store, now_ms);
+pub fn draw_above(
+    fb: &mut RenderFrame,
+    fx: &FxStore,
+    sim_store: &SimStore,
+    now_ms: u64,
+    limits: &FxLimits,
+) {
+    draw_motes(fb, fx, now_ms, limits);
+    draw_halos(fb, fx, sim_store, now_ms, limits);
 }
 
-fn draw_footsteps(fb: &mut RenderFrame, fx: &FxStore, now_ms: u64) {
+fn draw_footsteps(fb: &mut RenderFrame, fx: &FxStore, now_ms: u64, limits: &FxLimits) {
+    // `.max(1)` so a clamp-bypass zero lifetime still divides safely; the
+    // resulting `t` saturates to 1.0 and the entry's alpha drops to 0.
+    let lifetime = limits.footstep_lifetime_ms.max(1) as f32;
     for f in &fx.footsteps {
         let age = now_ms.saturating_sub(f.born_ms) as f32;
-        let t = (age / FOOTSTEP_LIFETIME_MS as f32).clamp(0.0, 1.0);
+        let t = (age / lifetime).clamp(0.0, 1.0);
         // JS uses 0.25 * (1 - t); we keep the same envelope.
         let alpha = 0.25 * (1.0 - t);
         if alpha <= 0.0 {
@@ -50,11 +66,12 @@ fn draw_footsteps(fb: &mut RenderFrame, fx: &FxStore, now_ms: u64) {
     }
 }
 
-fn draw_motes(fb: &mut RenderFrame, fx: &FxStore, now_ms: u64) {
+fn draw_motes(fb: &mut RenderFrame, fx: &FxStore, now_ms: u64, limits: &FxLimits) {
+    let lifetime = limits.mote_lifetime_ms.max(1) as f32;
     for m in &fx.motes {
         let age = now_ms.saturating_sub(m.born_ms) as f32;
-        let t = (age / MOTE_LIFETIME_MS as f32).clamp(0.0, 1.0);
-        // JS tweens y by -24 over MOTE_LIFETIME_MS; halved for render.
+        let t = (age / lifetime).clamp(0.0, 1.0);
+        // JS tweens y by -24 over the mote lifetime; halved for render.
         let lift = (24.0 * t).round() as i32;
         let cx = h(m.x as i32);
         let cy = h(m.y as i32) - h(lift);
@@ -71,10 +88,17 @@ fn draw_motes(fb: &mut RenderFrame, fx: &FxStore, now_ms: u64) {
     }
 }
 
-fn draw_tethers(fb: &mut RenderFrame, fx: &FxStore, sim_store: &SimStore, now_ms: u64) {
+fn draw_tethers(
+    fb: &mut RenderFrame,
+    fx: &FxStore,
+    sim_store: &SimStore,
+    now_ms: u64,
+    limits: &FxLimits,
+) {
+    let lifetime = limits.tether_lifetime_ms.max(1) as f32;
     for t in &fx.tethers {
         let age = now_ms.saturating_sub(t.born_ms) as f32;
-        let k = (age / TETHER_LIFETIME_MS as f32).clamp(0.0, 1.0);
+        let k = (age / lifetime).clamp(0.0, 1.0);
         let alpha = 0.4 * (1.0 - k);
         if alpha <= 0.0 {
             continue;
@@ -109,10 +133,17 @@ fn draw_tethers(fb: &mut RenderFrame, fx: &FxStore, sim_store: &SimStore, now_ms
     }
 }
 
-fn draw_halos(fb: &mut RenderFrame, fx: &FxStore, sim_store: &SimStore, now_ms: u64) {
+fn draw_halos(
+    fb: &mut RenderFrame,
+    fx: &FxStore,
+    sim_store: &SimStore,
+    now_ms: u64,
+    limits: &FxLimits,
+) {
+    let lifetime = limits.halo_lifetime_ms.max(1) as f32;
     for h_entry in &fx.halos {
         let age = now_ms.saturating_sub(h_entry.born_ms) as f32;
-        let t = (age / HALO_LIFETIME_MS as f32).clamp(0.0, 1.0);
+        let t = (age / lifetime).clamp(0.0, 1.0);
         let alpha = 0.6 * (1.0 - t);
         if alpha <= 0.0 {
             continue;
@@ -194,4 +225,3 @@ fn stroke_circle(fb: &mut RenderFrame, cx: i32, cy: i32, r: i32, c: Rgb, alpha: 
         }
     }
 }
-

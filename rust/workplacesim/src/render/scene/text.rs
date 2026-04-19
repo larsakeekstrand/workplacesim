@@ -8,7 +8,7 @@ use embedded_graphics::pixelcolor::Rgb888;
 use embedded_graphics::prelude::*;
 use embedded_graphics::text::Text;
 
-use super::super::fx_store::{FxStore, BENCH_FLASH_MS, FILE_TICK_MS};
+use super::super::fx_store::{FxLimits, FxStore};
 use super::super::geometry::{Rect, LAB_STATION_XS, MEETING_ROOM, OPEN_ROOM};
 use super::super::palette::{self, Rgb};
 use super::super::sim_store::{SimState, SimStore};
@@ -72,24 +72,20 @@ pub fn draw_whiteboard(
     let wb_x = h(MEETING_ROOM.x) + (h(MEETING_ROOM.w) - wb_w) / 2;
     let wb_y = h(MEETING_ROOM.y) + h(10);
     let style = MonoTextStyle::new(&ascii::FONT_5X8, to_rgb888(palette::WHITEBOARD_TEXT));
-    let _ = Text::new(
-        &truncated,
-        Point::new(wb_x + 2, wb_y + 7),
-        style,
-    )
-    .draw(fb);
+    let _ = Text::new(&truncated, Point::new(wb_x + 2, wb_y + 7), style).draw(fb);
 }
 
-pub fn draw_file_ticker(fb: &mut RenderFrame, fx: &FxStore, now_ms: u64) {
+pub fn draw_file_ticker(fb: &mut RenderFrame, fx: &FxStore, now_ms: u64, limits: &FxLimits) {
     if fx.file_ticks.is_empty() {
         return;
     }
     let tx = h(OPEN_ROOM.x + 10);
     let ty = h(OPEN_ROOM.y + 20);
+    let lifetime = limits.file_tick_ms.max(1) as f32;
     // JS shows newest on top; FxStore keeps oldest first, so reverse.
     for (i, tick) in fx.file_ticks.iter().rev().enumerate().take(3) {
         let age = now_ms.saturating_sub(tick.born_ms) as f32;
-        let alpha = (1.0 - age / FILE_TICK_MS as f32).clamp(0.0, 1.0);
+        let alpha = (1.0 - age / lifetime).clamp(0.0, 1.0);
         if alpha <= 0.0 {
             continue;
         }
@@ -177,10 +173,11 @@ fn format_local_time_hms() -> String {
     chrono::Local::now().format("%H:%M:%S").to_string()
 }
 
-pub fn draw_bench_flashes(fb: &mut RenderFrame, fx: &FxStore, now_ms: u64) {
+pub fn draw_bench_flashes(fb: &mut RenderFrame, fx: &FxStore, now_ms: u64, limits: &FxLimits) {
+    let lifetime = limits.bench_flash_ms.max(1) as f32;
     for bf in &fx.bench_flashes {
         let age = now_ms.saturating_sub(bf.born_ms) as f32;
-        let t = (age / BENCH_FLASH_MS as f32).clamp(0.0, 1.0);
+        let t = (age / lifetime).clamp(0.0, 1.0);
         let alpha = 0.6 * (1.0 - t);
         if alpha <= 0.0 || bf.station_idx >= LAB_STATION_XS.len() {
             continue;
@@ -244,7 +241,11 @@ impl<'a> DrawTarget for Tinted<'a> {
         I: IntoIterator<Item = Pixel<Self::Color>>,
     {
         for Pixel(p, _) in pixels {
-            if p.x < 0 || p.y < 0 || (p.x as u32) >= self.fb.width() || (p.y as u32) >= self.fb.height() {
+            if p.x < 0
+                || p.y < 0
+                || (p.x as u32) >= self.fb.width()
+                || (p.y as u32) >= self.fb.height()
+            {
                 continue;
             }
             let base = self.fb.get_pixel(p.x, p.y);
@@ -299,7 +300,10 @@ mod tests {
 
     #[test]
     fn short_path_one_level() {
-        assert_eq!(short_path("/Users/laek/source/workplacesim/src/main.rs"), "src/main.rs");
+        assert_eq!(
+            short_path("/Users/laek/source/workplacesim/src/main.rs"),
+            "src/main.rs"
+        );
         assert_eq!(short_path("main.rs"), "main.rs");
         assert_eq!(short_path(""), "");
         assert_eq!(short_path("a/b"), "a/b");
@@ -316,8 +320,12 @@ mod tests {
     #[test]
     fn pick_whiteboard_prefers_claude_agent() {
         let mut store = SimStore::new();
-        store.anim.insert("sess".into(), sim("sess", Room::Meeting, SimState::Seated));
-        store.anim.insert("sub".into(), sim("sub", Room::Meeting, SimState::Seated));
+        store
+            .anim
+            .insert("sess".into(), sim("sess", Room::Meeting, SimState::Seated));
+        store
+            .anim
+            .insert("sub".into(), sim("sub", Room::Meeting, SimState::Seated));
         let claude = Agent {
             agent_id: "sess".into(),
             agent_type: "claude".into(),
@@ -385,8 +393,8 @@ mod tests {
         fb.clear(palette::BG);
         draw_status_readout(&mut fb, 3_600_000, 0, Some(0));
         // Confirm the bottom-right corner has non-BG pixels.
-        let any_non_bg = (h(OPEN_ROOM.x + OPEN_ROOM.w) - 60..h(OPEN_ROOM.x + OPEN_ROOM.w))
-            .any(|x| {
+        let any_non_bg =
+            (h(OPEN_ROOM.x + OPEN_ROOM.w) - 60..h(OPEN_ROOM.x + OPEN_ROOM.w)).any(|x| {
                 (h(OPEN_ROOM.y + OPEN_ROOM.h) - 40..h(OPEN_ROOM.y + OPEN_ROOM.h))
                     .any(|y| fb.get_pixel(x, y) != palette::BG)
             });

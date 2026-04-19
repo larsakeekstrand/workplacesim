@@ -62,10 +62,9 @@ pub const GLYPH_WALK: Rgb = rgb_from_hex(0xaaaaaa);
 pub const GLYPH_PLAN: Rgb = rgb_from_hex(0xeef2f6);
 pub const GLYPH_LONG: Rgb = rgb_from_hex(0xd2b48c);
 
-/// Fixed alpha for window light-spill trapezoids. Step 4a: no breathing — a
-/// single constant, roughly midway between WINDOW_SPILL_BASE_ALPHA (0.08) and
-/// WINDOW_SPILL_PEAK_ALPHA (0.22) from main.js. Step 6 ties this to the EMA.
-pub const WINDOW_SPILL_ALPHA: f32 = 0.18;
+// Window light-spill alpha now lives on `Config::window_spill_alpha` (see
+// `crate::config`). Scene code takes the value as a parameter instead of
+// reaching for a module const.
 
 /// Tool-name → colour table. The JS object lookup is exact-match, but for
 /// prefixed tool names (e.g. `NotebookEdit`) the JS table explicitly enumerates

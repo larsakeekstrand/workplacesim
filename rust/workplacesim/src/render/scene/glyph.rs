@@ -13,7 +13,10 @@ use super::h;
 use crate::state::Agent;
 
 pub const LONG_SEATED_MS: u64 = 60_000;
-pub const ERROR_GLYPH_MS: u64 = 2_000;
+
+// `ERROR_GLYPH_MS` now comes from `Config::error_glyph_ms`; callers pass it
+// as a parameter. Not re-exported as a module const because the value is
+// ephemeral (a config toggle can change it between frames).
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GlyphKind {
@@ -28,20 +31,24 @@ pub enum GlyphKind {
 /// Per-frame glyph resolution for a single sim. Priority ladder:
 /// `!` (fresh tool-error) > flask (visit.room=="test") > idle (seated+idle) >
 /// walking (…) > plan (seated+plan) > Z (seated > LONG_SEATED_MS). None = hide.
+///
+/// `error_glyph_ms` is pulled from `Config::error_glyph_ms` by the caller and
+/// gates how long the red `!` stays up after a tool-error or halo.
 pub fn sim_glyph(
     sim: &SimAnim,
     agent: Option<&Agent>,
     fx: &FxStore,
     now_ms: u64,
+    error_glyph_ms: u64,
 ) -> Option<GlyphKind> {
     if let Some(halo) = fx.halos.iter().find(|h| h.agent_id == sim.agent_id) {
-        if now_ms.saturating_sub(halo.born_ms) < ERROR_GLYPH_MS {
+        if now_ms.saturating_sub(halo.born_ms) < error_glyph_ms {
             return Some(GlyphKind::Error);
         }
     }
     if let Some(a) = agent {
         if let Some(ce) = a.current_error.as_ref() {
-            if now_ms.saturating_sub(ce.ts) < ERROR_GLYPH_MS {
+            if now_ms.saturating_sub(ce.ts) < error_glyph_ms {
                 return Some(GlyphKind::Error);
             }
         }
@@ -62,9 +69,7 @@ pub fn sim_glyph(
         return Some(GlyphKind::Plan);
     }
     if let Some(since) = sim.seated_since_ms {
-        if matches!(sim.state, SimState::Seated)
-            && now_ms.saturating_sub(since) >= LONG_SEATED_MS
-        {
+        if matches!(sim.state, SimState::Seated) && now_ms.saturating_sub(since) >= LONG_SEATED_MS {
             return Some(GlyphKind::LongSeated);
         }
     }
@@ -79,13 +84,14 @@ pub fn draw_glyphs<F: Framebuffer>(
     agents: &[&Agent],
     fx: &FxStore,
     now_ms: u64,
+    error_glyph_ms: u64,
 ) {
     for sim in sim_store.iter() {
         if !sim.is_alive() {
             continue;
         }
         let agent = agents.iter().copied().find(|a| a.agent_id == sim.agent_id);
-        let Some(kind) = sim_glyph(sim, agent, fx, now_ms) else {
+        let Some(kind) = sim_glyph(sim, agent, fx, now_ms, error_glyph_ms) else {
             continue;
         };
         let (art, color) = sprite(kind);
@@ -119,74 +125,40 @@ fn draw_sprite<F: Framebuffer>(fb: &mut F, art: &[&str], x: i32, y: i32, color: 
 }
 
 // Exclamation — red vertical bar + dot, 2x6. Rendered at 2px wide for punch.
-pub const GLYPH_ERROR: &[&str] = &[
-    "##",
-    "##",
-    "##",
-    "##",
-    "..",
-    "##",
-];
+pub const GLYPH_ERROR: &[&str] = &["##", "##", "##", "##", "..", "##"];
 
 // Flask — small bottle silhouette, 7x8.
 pub const GLYPH_FLASK: &[&str] = &[
-    "..###..",
-    "..#.#..",
-    "..#.#..",
-    ".##.##.",
-    ".#...#.",
-    ".#...#.",
-    ".##.##.",
-    "..###..",
+    "..###..", "..#.#..", "..#.#..", ".##.##.", ".#...#.", ".#...#.", ".##.##.", "..###..",
 ];
 
 // Three z letters, descending. 8x7.
 pub const GLYPH_ZZZ: &[&str] = &[
-    "....####",
-    "...#..#.",
-    "..###...",
-    ".###....",
-    "##......",
-    "####....",
-    "........",
+    "....####", "...#..#.", "..###...", ".###....", "##......", "####....", "........",
 ];
 
 // Three dots, horizontal. 7x2.
-pub const GLYPH_DOTS: &[&str] = &[
-    "#.#.#.#",
-    "#.#.#.#",
-];
+pub const GLYPH_DOTS: &[&str] = &["#.#.#.#", "#.#.#.#"];
 
 // Clipboard outline, 6x8.
 pub const GLYPH_CLIPBOARD: &[&str] = &[
-    "..##..",
-    ".####.",
-    "######",
-    "#....#",
-    "#.##.#",
-    "#....#",
-    "#.##.#",
-    "######",
+    "..##..", ".####.", "######", "#....#", "#.##.#", "#....#", "#.##.#", "######",
 ];
 
 // Stylised Z, 5x6.
-pub const GLYPH_LONG: &[&str] = &[
-    "#####",
-    "...#.",
-    "..#..",
-    ".#...",
-    "#....",
-    "#####",
-];
+pub const GLYPH_LONG: &[&str] = &["#####", "...#.", "..#..", ".#...", "#....", "#####"];
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config;
     use crate::render::classify::Room;
     use crate::render::fx_store::{FxStore, Halo};
     use crate::render::geometry::Point;
     use crate::render::sim_store::SimAnim;
     use crate::state::{Agent, CurrentError, Visit};
+
+    const ERROR_GLYPH_MS: u64 = config::DEFAULT_ERROR_GLYPH_MS;
 
     fn make_sim(state: SimState, mode: &str, seated_since: Option<u64>) -> SimAnim {
         SimAnim {
@@ -219,13 +191,22 @@ mod tests {
     fn error_beats_all() {
         let sim = make_sim(SimState::Seated, "plan", Some(0));
         let mut fx = FxStore::new();
-        fx.halos.push(Halo { agent_id: "a1".into(), born_ms: 0 });
+        fx.halos.push(Halo {
+            agent_id: "a1".into(),
+            born_ms: 0,
+        });
         let a = agent_with(Agent {
-            visit: Some(Visit { room: "test".into(), until: 9_999 }),
+            visit: Some(Visit {
+                room: "test".into(),
+                until: 9_999,
+            }),
             idle: Some(true),
             ..Default::default()
         });
-        assert_eq!(sim_glyph(&sim, Some(&a), &fx, 500), Some(GlyphKind::Error));
+        assert_eq!(
+            sim_glyph(&sim, Some(&a), &fx, 500, ERROR_GLYPH_MS),
+            Some(GlyphKind::Error)
+        );
     }
 
     #[test]
@@ -240,9 +221,15 @@ mod tests {
             }),
             ..Default::default()
         });
-        assert_eq!(sim_glyph(&sim, Some(&a), &fx, 1_500), Some(GlyphKind::Error));
+        assert_eq!(
+            sim_glyph(&sim, Some(&a), &fx, 1_500, ERROR_GLYPH_MS),
+            Some(GlyphKind::Error)
+        );
         // Age past ERROR_GLYPH_MS: no longer an error.
-        assert_ne!(sim_glyph(&sim, Some(&a), &fx, 5_000), Some(GlyphKind::Error));
+        assert_ne!(
+            sim_glyph(&sim, Some(&a), &fx, 5_000, ERROR_GLYPH_MS),
+            Some(GlyphKind::Error)
+        );
     }
 
     #[test]
@@ -250,19 +237,31 @@ mod tests {
         let sim = make_sim(SimState::Seated, "default", Some(0));
         let fx = FxStore::new();
         let a = agent_with(Agent {
-            visit: Some(Visit { room: "test".into(), until: 9_999 }),
+            visit: Some(Visit {
+                room: "test".into(),
+                until: 9_999,
+            }),
             idle: Some(true),
             ..Default::default()
         });
-        assert_eq!(sim_glyph(&sim, Some(&a), &fx, 500), Some(GlyphKind::VisitingLab));
+        assert_eq!(
+            sim_glyph(&sim, Some(&a), &fx, 500, ERROR_GLYPH_MS),
+            Some(GlyphKind::VisitingLab)
+        );
     }
 
     #[test]
     fn idle_beats_walking_for_seated_sim() {
         let sim = make_sim(SimState::Seated, "default", Some(0));
         let fx = FxStore::new();
-        let a = agent_with(Agent { idle: Some(true), ..Default::default() });
-        assert_eq!(sim_glyph(&sim, Some(&a), &fx, 500), Some(GlyphKind::Idle));
+        let a = agent_with(Agent {
+            idle: Some(true),
+            ..Default::default()
+        });
+        assert_eq!(
+            sim_glyph(&sim, Some(&a), &fx, 500, ERROR_GLYPH_MS),
+            Some(GlyphKind::Idle)
+        );
     }
 
     #[test]
@@ -270,7 +269,10 @@ mod tests {
         let sim = make_sim(SimState::WalkingIn, "plan", None);
         let fx = FxStore::new();
         let a = agent_with(Agent::default());
-        assert_eq!(sim_glyph(&sim, Some(&a), &fx, 500), Some(GlyphKind::Walking));
+        assert_eq!(
+            sim_glyph(&sim, Some(&a), &fx, 500, ERROR_GLYPH_MS),
+            Some(GlyphKind::Walking)
+        );
     }
 
     #[test]
@@ -280,7 +282,7 @@ mod tests {
         let a = agent_with(Agent::default());
         // Past LONG_SEATED_MS but plan glyph wins.
         assert_eq!(
-            sim_glyph(&sim, Some(&a), &fx, LONG_SEATED_MS + 10),
+            sim_glyph(&sim, Some(&a), &fx, LONG_SEATED_MS + 10, ERROR_GLYPH_MS),
             Some(GlyphKind::Plan)
         );
     }
@@ -290,9 +292,12 @@ mod tests {
         let sim = make_sim(SimState::Seated, "default", Some(0));
         let fx = FxStore::new();
         let a = agent_with(Agent::default());
-        assert_eq!(sim_glyph(&sim, Some(&a), &fx, LONG_SEATED_MS - 1), None);
         assert_eq!(
-            sim_glyph(&sim, Some(&a), &fx, LONG_SEATED_MS),
+            sim_glyph(&sim, Some(&a), &fx, LONG_SEATED_MS - 1, ERROR_GLYPH_MS),
+            None
+        );
+        assert_eq!(
+            sim_glyph(&sim, Some(&a), &fx, LONG_SEATED_MS, ERROR_GLYPH_MS),
             Some(GlyphKind::LongSeated)
         );
     }
@@ -302,6 +307,6 @@ mod tests {
         let sim = make_sim(SimState::Seated, "default", Some(0));
         let fx = FxStore::new();
         let a = agent_with(Agent::default());
-        assert_eq!(sim_glyph(&sim, Some(&a), &fx, 100), None);
+        assert_eq!(sim_glyph(&sim, Some(&a), &fx, 100, ERROR_GLYPH_MS), None);
     }
 }

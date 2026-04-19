@@ -70,10 +70,7 @@ fn event_stream(
             match item {
                 Ok(ev) => Some(to_sse(&ev)),
                 Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(n)) => {
-                    tracing::warn!(
-                        missed = n,
-                        "SSE subscriber lagged; sending fresh snapshot"
-                    );
+                    tracing::warn!(missed = n, "SSE subscriber lagged; sending fresh snapshot");
                     let snap = state.read().snapshot_event();
                     Some(to_sse(&snap))
                 }
@@ -93,4 +90,3 @@ fn to_sse(event: &Event) -> Result<SseEvent, Infallible> {
         .unwrap_or_else(|_| r#"{"type":"error","message":"serialize-failed"}"#.to_string());
     Ok(SseEvent::default().data(payload))
 }
-

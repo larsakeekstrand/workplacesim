@@ -22,13 +22,17 @@ pub mod text;
 
 use super::{palette, Framebuffer};
 
-pub fn draw_static_background(fb: &mut impl Framebuffer) {
+/// Paint the static world (floor, walls, windows, fixed furniture). The
+/// `window_spill_alpha` argument comes from `Config::window_spill_alpha`;
+/// golden-frame tests pass `crate::config::DEFAULT_WINDOW_SPILL_ALPHA` to
+/// keep the hardcoded default reproducible.
+pub fn draw_static_background(fb: &mut impl Framebuffer, window_spill_alpha: f32) {
     fb.fill_rect(
         super::Rect::new(0, 0, fb.width() as i32, fb.height() as i32),
         palette::BG,
     );
     rooms::draw_floor(fb);
-    rooms::draw_windows(fb);
+    rooms::draw_windows(fb, window_spill_alpha);
     rooms::draw_walls(fb);
     furniture::draw_desks(fb);
     furniture::draw_meeting_room(fb);

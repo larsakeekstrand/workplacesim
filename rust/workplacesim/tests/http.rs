@@ -1,12 +1,24 @@
 //! Integration tests that exercise the axum router via `oneshot`, without
 //! binding a TCP port. Covers the checklist in the step-2 brief.
 
-use axum::body::{Body, to_bytes};
+use axum::body::{to_bytes, Body};
 use axum::http::{Method, Request, StatusCode};
 use serde_json::Value;
 use tokio::sync::broadcast::error::TryRecvError;
 use tower::ServiceExt;
+use workplacesim::config::{self, Config, SharedConfig};
+use workplacesim::server::AppState;
 use workplacesim::{server, state, Event};
+
+fn test_config() -> SharedConfig {
+    config::shared(Config::default())
+}
+
+/// Wrap a freshly-constructed `Shared` into an `AppState` with a throwaway
+/// config. Keeps existing test bodies unchanged apart from one extra call.
+fn test_app(state: server::Shared) -> AppState {
+    AppState::for_tests(state, test_config())
+}
 
 fn json_post(uri: &str, body: &str) -> Request<Body> {
     Request::builder()
@@ -31,8 +43,8 @@ fn drain(rx: &mut tokio::sync::broadcast::Receiver<Event>) -> Vec<Event> {
 
 #[tokio::test]
 async fn pretool_agent_buffers_description_consumed_by_start() {
-    let (state, mut rx) = state::new_state();
-    let app = server::build_router(state.clone());
+    let (state, mut rx) = state::new_state(test_config());
+    let app = server::build_router(test_app(state.clone()));
 
     // PreToolUse(Agent) with tool_input → buffers.
     let req = json_post(
@@ -80,8 +92,8 @@ async fn pretool_agent_buffers_description_consumed_by_start() {
 
 #[tokio::test]
 async fn pretool_non_agent_tool_is_noop() {
-    let (state, mut rx) = state::new_state();
-    let app = server::build_router(state.clone());
+    let (state, mut rx) = state::new_state(test_config());
+    let app = server::build_router(test_app(state.clone()));
 
     let req = json_post(
         "/hooks/pretool",
@@ -104,8 +116,8 @@ async fn pretool_non_agent_tool_is_noop() {
 
 #[tokio::test]
 async fn subagent_start_roundtrip_and_api_agents_shape() {
-    let (state, mut rx) = state::new_state();
-    let app = server::build_router(state.clone());
+    let (state, mut rx) = state::new_state(test_config());
+    let app = server::build_router(test_app(state.clone()));
 
     let req = json_post(
         "/hooks/subagent-start",
@@ -128,7 +140,11 @@ async fn subagent_start_roundtrip_and_api_agents_shape() {
     assert_eq!(resp.status(), StatusCode::OK);
     let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
     let v: Value = serde_json::from_slice(&body).unwrap();
-    let agents = v.get("agents").expect("top-level agents key").as_array().unwrap();
+    let agents = v
+        .get("agents")
+        .expect("top-level agents key")
+        .as_array()
+        .unwrap();
     assert_eq!(agents.len(), 1);
     assert_eq!(agents[0]["agent_id"].as_str(), Some("a1"));
     assert_eq!(agents[0]["user"].as_str(), Some("daisy"));
@@ -136,8 +152,8 @@ async fn subagent_start_roundtrip_and_api_agents_shape() {
 
 #[tokio::test]
 async fn subagent_stop_direct_removes_from_list() {
-    let (state, mut rx) = state::new_state();
-    let app = server::build_router(state.clone());
+    let (state, mut rx) = state::new_state(test_config());
+    let app = server::build_router(test_app(state.clone()));
 
     let req = json_post(
         "/hooks/subagent-start",
@@ -168,15 +184,16 @@ async fn subagent_stop_direct_removes_from_list() {
 
 #[tokio::test]
 async fn subagent_stop_fifo_fallback() {
-    let (state, mut rx) = state::new_state();
-    let app = server::build_router(state.clone());
+    let (state, mut rx) = state::new_state(test_config());
+    let app = server::build_router(test_app(state.clone()));
 
     // Two subagents same (session_id, agent_type). Oldest is tu-1.
     for id in ["tu-1", "tu-2"] {
-        let body = format!(
-            r#"{{"agent_id":"{id}","agent_type":"verifier","session_id":"sess"}}"#
-        );
-        app.clone().oneshot(json_post("/hooks/subagent-start", &body)).await.unwrap();
+        let body = format!(r#"{{"agent_id":"{id}","agent_type":"verifier","session_id":"sess"}}"#);
+        app.clone()
+            .oneshot(json_post("/hooks/subagent-start", &body))
+            .await
+            .unwrap();
     }
     let _ = drain(&mut rx);
 
@@ -201,8 +218,8 @@ async fn subagent_stop_fifo_fallback() {
 
 #[tokio::test]
 async fn lab_visit_emits_visit_with_until() {
-    let (state, mut rx) = state::new_state();
-    let app = server::build_router(state.clone());
+    let (state, mut rx) = state::new_state(test_config());
+    let app = server::build_router(test_app(state.clone()));
 
     app.clone()
         .oneshot(json_post(
@@ -223,7 +240,11 @@ async fn lab_visit_emits_visit_with_until() {
     let events = drain(&mut rx);
     assert_eq!(events.len(), 1);
     match &events[0] {
-        Event::Visit { agent_id, room, until } => {
+        Event::Visit {
+            agent_id,
+            room,
+            until,
+        } => {
             assert_eq!(agent_id, "a1");
             assert_eq!(room.as_deref(), Some("test"));
             assert!(until.is_some());
@@ -234,8 +255,8 @@ async fn lab_visit_emits_visit_with_until() {
 
 #[tokio::test]
 async fn tool_event_known_agent_emits_tool_unknown_is_204_and_silent() {
-    let (state, mut rx) = state::new_state();
-    let app = server::build_router(state.clone());
+    let (state, mut rx) = state::new_state(test_config());
+    let app = server::build_router(test_app(state.clone()));
 
     app.clone()
         .oneshot(json_post(
@@ -274,8 +295,8 @@ async fn tool_event_known_agent_emits_tool_unknown_is_204_and_silent() {
 
 #[tokio::test]
 async fn lifecycle_prompt_truncates_text() {
-    let (state, mut rx) = state::new_state();
-    let app = server::build_router(state.clone());
+    let (state, mut rx) = state::new_state(test_config());
+    let app = server::build_router(test_app(state.clone()));
 
     app.clone()
         .oneshot(json_post(
@@ -313,8 +334,8 @@ async fn lifecycle_prompt_truncates_text() {
 
 #[tokio::test]
 async fn lifecycle_tool_error_stores_current_error_and_emits() {
-    let (state, mut rx) = state::new_state();
-    let app = server::build_router(state.clone());
+    let (state, mut rx) = state::new_state(test_config());
+    let app = server::build_router(test_app(state.clone()));
 
     app.clone()
         .oneshot(json_post(
@@ -343,7 +364,11 @@ async fn lifecycle_tool_error_stores_current_error_and_emits() {
     let events = drain(&mut rx);
     assert_eq!(events.len(), 1);
     match &events[0] {
-        Event::ToolError { message, tool_name, agent_id } => {
+        Event::ToolError {
+            message,
+            tool_name,
+            agent_id,
+        } => {
             assert_eq!(message.len(), 80);
             assert_eq!(tool_name, "Bash");
             assert_eq!(agent_id, "a1");
@@ -361,8 +386,8 @@ async fn lifecycle_tool_error_stores_current_error_and_emits() {
 
 #[tokio::test]
 async fn cors_preflight_returns_allow_origin_star() {
-    let (state, _rx) = state::new_state();
-    let app = server::build_router(state);
+    let (state, _rx) = state::new_state(test_config());
+    let app = server::build_router(test_app(state));
 
     let req = Request::builder()
         .method(Method::OPTIONS)
@@ -385,8 +410,8 @@ async fn cors_preflight_returns_allow_origin_star() {
 
 #[tokio::test]
 async fn malformed_json_body_returns_400() {
-    let (state, _rx) = state::new_state();
-    let app = server::build_router(state);
+    let (state, _rx) = state::new_state(test_config());
+    let app = server::build_router(test_app(state));
 
     let req = json_post("/hooks/subagent-start", r#"{ not json"#);
     let resp = app.oneshot(req).await.unwrap();
@@ -395,8 +420,8 @@ async fn malformed_json_body_returns_400() {
 
 #[tokio::test]
 async fn api_agents_empty_shape() {
-    let (state, _rx) = state::new_state();
-    let app = server::build_router(state);
+    let (state, _rx) = state::new_state(test_config());
+    let app = server::build_router(test_app(state));
 
     let req = Request::builder()
         .method("GET")

@@ -17,19 +17,10 @@ use super::palette::hash_str;
 use super::routing::{compute_route, path_to_door_from, Target};
 use super::world::RenderWorld;
 
-/// JS `walkPath` uses `duration = max(180, (dist/110) * 1000)` — i.e. a cruise
-/// speed of 110 world-px/sec (55 px/s at half-scale render). Bumped to ~1.6x
-/// that for TV legibility; at low refresh + viewing distance the original
-/// cadence reads as plodding. See `public/main.js` line 1610.
-pub const WALK_SPEED_PX_PER_SEC: f32 = 90.0;
-
-/// Minimum duration per segment in render ms. Mirrors the JS floor of 180 ms so
-/// short hops don't tween faster than the eye can follow.
-pub const MIN_SEGMENT_MS: u64 = 180;
-
-/// How fast the seated bob oscillator advances (JS: 900 ms half-period, yoyo =
-/// 1800 ms full cycle). We store phase in radians, progress = 2π / 1800 ms.
-pub const BOB_RAD_PER_MS: f32 = std::f32::consts::TAU / 1800.0;
+// Walk speed, min-segment, and bob cycle now live on `Config` (see
+// `crate::config`). These used to be module-level consts; Task #2 of the
+// Ethereal Thimble plan threads them through per-frame so the config website
+// can retune motion live. Call sites take the values as parameters.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SeatId {
@@ -269,11 +260,21 @@ impl SimStore {
 
     /// Advance each sim's position / phase by `dt_ms`. Reads nothing from the
     /// outside world; `reconcile` is responsible for feeding fresh paths.
-    pub fn tick(&mut self, dt_ms: u64, now_ms: u64) {
+    ///
+    /// `walk_speed_px_per_sec` and `bob_cycle_ms` come from `Config` — the
+    /// caller snapshots them under a single short read-lock per frame. The
+    /// `MIN_SEGMENT_MS` floor from the JS port lives only in the route builder;
+    /// the inner per-ms loop here isn't segment-aware so the min-segment knob
+    /// is a no-op for the Rust renderer (unchanged from the pre-config code,
+    /// which also didn't reference it in `tick`).
+    pub fn tick(&mut self, dt_ms: u64, now_ms: u64, walk_speed_px_per_sec: f32, bob_cycle_ms: u64) {
+        // Derive bob progression per ms. `.max(1)` guards against a clamp
+        // bypass that could otherwise divide by zero.
+        let bob_rad_per_ms = std::f32::consts::TAU / bob_cycle_ms.max(1) as f32;
         for sim in self.anim.values_mut() {
             match sim.state {
                 SimState::WalkingIn | SimState::WalkingOut => {
-                    advance_along_path(sim, dt_ms);
+                    advance_along_path(sim, dt_ms, walk_speed_px_per_sec);
                     if sim.path.is_empty() {
                         match sim.state {
                             SimState::WalkingIn => {
@@ -291,7 +292,7 @@ impl SimStore {
                 }
                 SimState::Seated => {
                     sim.bob_phase =
-                        (sim.bob_phase + BOB_RAD_PER_MS * dt_ms as f32) % std::f32::consts::TAU;
+                        (sim.bob_phase + bob_rad_per_ms * dt_ms as f32) % std::f32::consts::TAU;
                 }
                 SimState::Gone => {}
             }
@@ -308,7 +309,10 @@ impl SimStore {
 /// Walk a sim toward its next waypoint. If it reaches it, pop and keep moving
 /// with remaining budget. Frame cadence is ~30 fps so dt ~= 33 ms; segments can
 /// be much shorter so we loop.
-fn advance_along_path(sim: &mut SimAnim, dt_ms: u64) {
+fn advance_along_path(sim: &mut SimAnim, dt_ms: u64, walk_speed_px_per_sec: f32) {
+    // Guard: a zero speed would stall forever; clamp lives in `Config::clamp`
+    // but the hot path has to be safe too.
+    let speed = walk_speed_px_per_sec.max(1.0);
     let mut remaining_ms = dt_ms as f32;
     while remaining_ms > 0.0 && !sim.path.is_empty() {
         let wp = sim.path[0];
@@ -319,11 +323,11 @@ fn advance_along_path(sim: &mut SimAnim, dt_ms: u64) {
             sim.path.remove(0);
             continue;
         }
-        let step = WALK_SPEED_PX_PER_SEC * remaining_ms / 1000.0;
+        let step = speed * remaining_ms / 1000.0;
         if step >= dist {
             sim.x = wp.x as f32;
             sim.y = wp.y as f32;
-            let consumed_ms = dist * 1000.0 / WALK_SPEED_PX_PER_SEC;
+            let consumed_ms = dist * 1000.0 / speed;
             remaining_ms = (remaining_ms - consumed_ms).max(0.0);
             sim.path.remove(0);
         } else {
@@ -338,7 +342,14 @@ fn advance_along_path(sim: &mut SimAnim, dt_ms: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config;
     use crate::render::world::AgentView;
+
+    // Pin tick values to the defaults so the old test expectations still
+    // hold. Exposed as test-only constants so `store.tick(...)` calls stay
+    // readable after the live consts were folded into `Config`.
+    const WALK_SPEED_PX_PER_SEC: f32 = config::DEFAULT_WALK_SPEED_PX_PER_SEC;
+    const BOB_CYCLE_MS: u64 = config::DEFAULT_BOB_CYCLE_MS;
 
     fn agent(
         id: &str,
@@ -367,10 +378,7 @@ mod tests {
     #[test]
     fn reconcile_spawns_new_agent() {
         let mut store = SimStore::new();
-        let w = world(
-            vec![agent("a1", "alice", "coder", "default", 0, None)],
-            0,
-        );
+        let w = world(vec![agent("a1", "alice", "coder", "default", 0, None)], 0);
         store.reconcile(&w);
         let sim = store.anim.get("a1").expect("sim exists");
         assert_eq!(sim.state, SimState::WalkingIn);
@@ -426,13 +434,23 @@ mod tests {
         // Path starts at (0,0) with first waypoint at (110,0). Tick slightly under
         // the time needed to reach it so we can verify advancement without pops.
         let almost_a_leg_ms = (109.0 * 1000.0 / WALK_SPEED_PX_PER_SEC) as u64;
-        store.tick(almost_a_leg_ms, almost_a_leg_ms);
+        store.tick(
+            almost_a_leg_ms,
+            almost_a_leg_ms,
+            WALK_SPEED_PX_PER_SEC,
+            BOB_CYCLE_MS,
+        );
         let sim = &store.anim["t"];
         assert!(sim.x > 0.0 && sim.x < 110.0, "x={}", sim.x);
         assert_eq!(sim.y, 0.0);
         assert_eq!(sim.path.len(), 3, "haven't reached first waypoint");
         // Another big tick: should pass the first waypoint.
-        store.tick(2_000, almost_a_leg_ms + 2_000);
+        store.tick(
+            2_000,
+            almost_a_leg_ms + 2_000,
+            WALK_SPEED_PX_PER_SEC,
+            BOB_CYCLE_MS,
+        );
         let sim = &store.anim["t"];
         assert!(sim.path.len() < 3, "advanced past first waypoint");
     }
@@ -461,7 +479,7 @@ mod tests {
         };
         store.anim.insert("t".into(), sim);
         // 10 px at 55 px/s => ~182 ms. Tick 500 ms to be safe.
-        store.tick(500, 500);
+        store.tick(500, 500, WALK_SPEED_PX_PER_SEC, BOB_CYCLE_MS);
         let sim = &store.anim["t"];
         assert_eq!(sim.state, SimState::Seated);
         assert_eq!(sim.x, 10.0);
@@ -545,7 +563,7 @@ mod tests {
             last_footstep_ms: 0,
         };
         store.anim.insert("t".into(), sim);
-        store.tick(900, 900);
+        store.tick(900, 900, WALK_SPEED_PX_PER_SEC, BOB_CYCLE_MS);
         assert!(store.anim["t"].bob_phase > 0.0);
     }
 

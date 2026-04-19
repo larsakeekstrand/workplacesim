@@ -28,11 +28,30 @@ cd rust/workplacesim
 
 The script runs `cross build --target arm-unknown-linux-gnueabihf --release
 --features fb --no-default-features`, `scp`s the binary + service unit to the
-Pi, and `ssh`es in to enable and restart the service.
+Pi, and `ssh`es in to enable and restart the service. It also installs
+`avahi-daemon` (if missing), renames the Pi to `workplacesim`, and publishes
+an mDNS-SD service record so the Pi is reachable at `workplacesim.local` on
+the LAN without any per-client discovery.
 
 Requires `cross`, `docker`, `ssh`, `scp` on the host. Install cross with
 `cargo install cross`. Docker must be running (cross uses it for the arm
 toolchain image).
+
+### Install flags
+
+- `--hostname <name>` — use a hostname other than `workplacesim`. Clients
+  then reach the Pi at `<name>.local:4317`.
+- `--skip-hostname` — leave the existing Pi hostname alone. The avahi service
+  record still gets installed, so the Pi shows up as
+  `workplacesim on <current-hostname>` in Bonjour browsers and is reachable
+  at `<current-hostname>.local:4317`.
+- `--status-only` — skip build + copy; just print service status and logs.
+
+### Multiple Pis on one LAN
+
+Give each Pi a distinct hostname (`--hostname wpsim-lab`, `--hostname
+wpsim-desk`). Without that, avahi resolves name collisions by suffixing the
+second to `workplacesim-2.local`, which defeats the predictable-URL promise.
 
 ## Post-deploy
 
@@ -48,16 +67,26 @@ Claude Code hook POSTs target `http://127.0.0.1:4317` by default. Point them
 at the Pi:
 
 ```sh
-export WORKPLACESIM_URL=http://<host>:4317
+export WORKPLACESIM_URL=http://workplacesim.local:4317
 ```
 
 Put that in your shell rc so every Claude Code session reaches the Pi.
+`install.sh` prints this exact line at the end of a successful deploy, using
+whatever hostname the Pi ended up with.
+
+If `.local` resolution is blocked on your LAN (some enterprise networks
+filter mDNS), fall back to the Pi's IP:
+`export WORKPLACESIM_URL=http://<ip>:4317`.
 
 ## Browser debug
 
 The server embeds `public/index.html` and `public/main.js` and serves them on
-`/`. Open `http://<host>:4317/` on your Mac to watch the same scene Phaser
-renders, alongside what the Pi is drawing to HDMI. SSE lives at `/events`.
+`/`. Open `http://workplacesim.local:4317/` on your Mac to watch the same
+scene Phaser renders, alongside what the Pi is drawing to HDMI. SSE lives at
+`/events`.
+
+To confirm the mDNS advertisement from the Mac:
+`dns-sd -B _workplacesim._tcp` should list the running instance.
 
 ## Non-root operation (stretch)
 
@@ -73,6 +102,29 @@ access out of the box. If you want to drop privileges:
 If the service fails with EACCES on `/dev/fb0` or the VT ioctls, the `pi`
 user's supplementary groups aren't in effect yet — log out and back in, or
 reboot.
+
+## Live tuning via `/config`
+
+Open `http://<pi>:4317/config` from a laptop on the same network. The page
+shows server status (uptime, active sims, event rate, detected fb
+geometry) and live-editable settings for sim motion, effect density,
+lifecycle TTLs, and display (window size + fullscreen on the desktop
+build; framebuffer info read-only on the Pi).
+
+Changes persist to a JSON file resolved from (in order):
+`$WORKPLACESIM_CONFIG_PATH`, `$XDG_CONFIG_HOME/workplacesim/config.json`
+or `$HOME/.config/workplacesim/config.json`, then
+`./workplacesim-config.json` next to the binary.
+
+Out-of-range values clamp to safe bounds and bad edits fall back to
+defaults without crashing the service — the `/config` page remains
+reachable in every case so a faulty change can always be reverted.
+`POST /api/config/reset` (or the Reset button) restores every field.
+
+Fields that need the service to bounce before they apply (window size /
+fullscreen on the fb build) are tagged `[restart]` in the form; the
+`Restart service` button and `POST /api/restart` exit the process, and
+systemd's `Restart=always` brings it back within ~1 second.
 
 ## Uninstall
 

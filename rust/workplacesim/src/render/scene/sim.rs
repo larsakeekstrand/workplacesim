@@ -70,7 +70,12 @@ fn draw_sim<F: Framebuffer>(fb: &mut F, sim: &SimAnim) {
     let (left_leg_h, right_leg_h) = leg_lengths(sim, leg_h);
     let legs_top_y = cy + scaled(3);
     fb.fill_rect(
-        Rect::new(cx - leg_w - leg_gap / 2 - leg_w + 1, legs_top_y, leg_w, left_leg_h),
+        Rect::new(
+            cx - leg_w - leg_gap / 2 - leg_w + 1,
+            legs_top_y,
+            leg_w,
+            left_leg_h,
+        ),
         colors.pants,
     );
     fb.fill_rect(

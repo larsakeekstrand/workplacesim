@@ -8,8 +8,8 @@
 
 use super::fx_store::FxStore;
 use super::geometry::Rect;
-use super::sim_store::{SimAnim, SimStore};
 use super::scene::h;
+use super::sim_store::{SimAnim, SimStore};
 use super::{RENDER_H, RENDER_W};
 
 /// AABB padding (render px). Sprites outgrow their nominal bounds during
@@ -73,7 +73,8 @@ impl DirtyTracker {
 /// Collect AABBs for everything that moves: sims + motes + footsteps +
 /// tethers + halos. Clipped to the viewport; empty rects are dropped.
 pub fn collect_dynamics(sim_store: &SimStore, fx: &FxStore) -> Vec<Rect> {
-    let mut out: Vec<Rect> = Vec::with_capacity(sim_store.anim.len() + fx.footsteps.len() + fx.motes.len());
+    let mut out: Vec<Rect> =
+        Vec::with_capacity(sim_store.anim.len() + fx.footsteps.len() + fx.motes.len());
 
     for sim in sim_store.iter() {
         if let Some(r) = sim_aabb(sim) {
@@ -84,7 +85,12 @@ pub fn collect_dynamics(sim_store: &SimStore, fx: &FxStore) -> Vec<Rect> {
     for f in &fx.footsteps {
         let cx = h(f.x as i32);
         let cy = h(f.y as i32);
-        out.push(clip(Rect::new(cx - FX_PADDING, cy - FX_PADDING, FX_PADDING * 2, FX_PADDING * 2)));
+        out.push(clip(Rect::new(
+            cx - FX_PADDING,
+            cy - FX_PADDING,
+            FX_PADDING * 2,
+            FX_PADDING * 2,
+        )));
     }
 
     for m in &fx.motes {
@@ -100,10 +106,9 @@ pub fn collect_dynamics(sim_store: &SimStore, fx: &FxStore) -> Vec<Rect> {
     }
 
     for t in &fx.tethers {
-        let (Some(parent), Some(child)) = (
-            sim_store.anim.get(&t.parent),
-            sim_store.anim.get(&t.child),
-        ) else {
+        let (Some(parent), Some(child)) =
+            (sim_store.anim.get(&t.parent), sim_store.anim.get(&t.child))
+        else {
             continue;
         };
         out.push(line_aabb(parent, child));
@@ -160,11 +165,7 @@ fn line_aabb(a: &SimAnim, b: &SimAnim) -> Rect {
 /// Compute the full dirty set for a frame: dynamics AABBs ∪ last frame's
 /// dynamics AABBs, merged. Pure function — the caller owns `last_dirty`. Use
 /// `DirtyTracker::step` for the common stateful path.
-pub fn compute_frame_dirties(
-    sim_store: &SimStore,
-    fx: &FxStore,
-    last_dirty: &[Rect],
-) -> Vec<Rect> {
+pub fn compute_frame_dirties(sim_store: &SimStore, fx: &FxStore, last_dirty: &[Rect]) -> Vec<Rect> {
     let mut combined = collect_dynamics(sim_store, fx);
     combined.extend(last_dirty.iter().copied());
     merge_rects(combined)
@@ -318,7 +319,11 @@ mod tests {
         assert_eq!(d.len(), 1);
         // (200,200) JS world → (100,100) render. AABB must contain (100,100).
         let r = d[0];
-        assert!(r.contains(Point::new(100, 100)), "rect {:?} should contain (100,100)", r);
+        assert!(
+            r.contains(Point::new(100, 100)),
+            "rect {:?} should contain (100,100)",
+            r
+        );
     }
 
     #[test]
@@ -391,14 +396,21 @@ mod tests {
         assert_eq!(d.len(), 1);
         // Halo radius (max) extends the AABB beyond the sim body.
         let r = d[0];
-        assert!(r.w >= HALO_MAX_R * 2, "halo AABB width {} < {}", r.w, HALO_MAX_R * 2);
+        assert!(
+            r.w >= HALO_MAX_R * 2,
+            "halo AABB width {} < {}",
+            r.w,
+            HALO_MAX_R * 2
+        );
     }
 
     #[test]
     fn compute_frame_dirties_skips_tether_with_missing_endpoint() {
         // Tether referencing a non-existent child sim → ignored.
         let mut sim_store = SimStore::new();
-        sim_store.anim.insert("parent".into(), mk_sim("parent", 100.0, 100.0));
+        sim_store
+            .anim
+            .insert("parent".into(), mk_sim("parent", 100.0, 100.0));
         let mut fx = FxStore::new();
         fx.tethers.push(Tether {
             parent: "parent".into(),

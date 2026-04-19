@@ -9,9 +9,16 @@
 //! conversions and fit math live outside the cfg so they can be unit tested
 //! on any host.
 
+use super::fit::ScaleFit;
 use super::geometry::Rect;
 use super::Framebuffer;
 use super::RenderFrame;
+
+// Re-exported for external callers that used to import these from
+// `render::fb` — the types moved to `render::fit` in Task #5 so the desktop
+// backend (which doesn't compile `fb`) can use them too.
+#[allow(unused_imports)]
+pub use super::fit::compute_scale_fit;
 
 /// Detected framebuffer pixel layout. The Pi legacy stack supports either
 /// 16bpp RGB565 or 32bpp XRGB8888 via `framebuffer_depth=` in `/boot/config.txt`;
@@ -32,81 +39,6 @@ impl PixelFormat {
             PixelFormat::Rgb565 => 2,
             PixelFormat::Xrgb8888 => 4,
         }
-    }
-}
-
-/// Geometry describing where the scaled render frame lands inside the fb.
-/// The scaled size comes from `ScaleFit`; dst_x/dst_y centre it with black
-/// pillarbox/letterbox on any panel whose aspect differs from 16:9.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Letterbox {
-    pub dst_x: i32,
-    pub dst_y: i32,
-    pub visible_w: i32,
-    pub visible_h: i32,
-}
-
-/// Aspect-preserving nearest-neighbour fit. `letterbox` is where the scaled
-/// image sits in the fb; `col_src`/`row_src` are per-output-pixel lookup
-/// tables into the source frame. Computed once at fb open; the hot blit
-/// loop is a single table lookup + pack per output pixel with no division.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ScaleFit {
-    pub letterbox: Letterbox,
-    pub col_src: Vec<u16>,
-    pub row_src: Vec<u16>,
-}
-
-/// Pick the largest `scaled_w x scaled_h` where both axes preserve the
-/// source aspect and fit within the target. Integer 2x / 3x fall out
-/// exactly when the target is an integer multiple of the source in both
-/// axes; non-integer panels (e.g. 1024x768) get `src_w * 1.6` horizontal
-/// with a vertical letterbox.
-pub fn compute_scale_fit(src_w: i32, src_h: i32, target_w: i32, target_h: i32) -> ScaleFit {
-    let (scaled_w, scaled_h) = if src_w > 0 && src_h > 0 && target_w > 0 && target_h > 0 {
-        // Try height-limited first: max vertical fit, then derive width. If
-        // the derived width exceeds target_w, switch to width-limited.
-        let try_w = (src_w as i64 * target_h as i64) / src_h as i64;
-        if try_w <= target_w as i64 {
-            (try_w as i32, target_h)
-        } else {
-            let try_h = (src_h as i64 * target_w as i64) / src_w as i64;
-            (target_w, try_h as i32)
-        }
-    } else {
-        (0, 0)
-    };
-    let scaled_w = scaled_w.max(0);
-    let scaled_h = scaled_h.max(0);
-    let dst_x = ((target_w - scaled_w) / 2).max(0);
-    let dst_y = ((target_h - scaled_h) / 2).max(0);
-    let col_src: Vec<u16> = (0..scaled_w)
-        .map(|dx| {
-            if scaled_w > 0 {
-                ((dx as i64 * src_w as i64) / scaled_w as i64) as u16
-            } else {
-                0
-            }
-        })
-        .collect();
-    let row_src: Vec<u16> = (0..scaled_h)
-        .map(|dy| {
-            if scaled_h > 0 {
-                ((dy as i64 * src_h as i64) / scaled_h as i64) as u16
-            } else {
-                0
-            }
-        })
-        .collect();
-    ScaleFit {
-        letterbox: Letterbox {
-            dst_x,
-            dst_y,
-            visible_w: scaled_w,
-            visible_h: scaled_h,
-        },
-        col_src,
-        row_src,
     }
 }
 
@@ -275,15 +207,14 @@ mod linux_impl {
     use memmap2::{MmapMut, MmapOptions};
     use tokio::sync::broadcast;
 
+    use crate::config::SharedConfig;
     use crate::render::dirty::DirtyTracker;
-    use crate::render::fx_store::FxStore;
+    use crate::render::fx_store::{FxLimits, FxStore};
     use crate::render::sim_store::SimStore;
     use crate::render::world::RenderWorld;
     use crate::render::{palette, scene, RenderFrame, RENDER_H, RENDER_W};
     use crate::server::Shared;
     use crate::state::{clock, Event};
-
-    const TARGET_FPS: u64 = 30;
 
     // Linux ioctl request numbers — from <linux/fb.h> and <linux/kd.h>.
     // Hard-coded so we don't need bindgen: these are stable ABI numbers that
@@ -451,7 +382,17 @@ mod linux_impl {
                 ));
             }
 
-            let format = match (vinfo.bits_per_pixel, vinfo.red.offset, vinfo.green.offset, vinfo.blue.offset) {
+            // rustfmt has an idempotency bug on this macro-in-match-arm:
+            // running `cargo fmt` alternates between the inline form and the
+            // block form. #[rustfmt::skip] pins a single stable shape so
+            // `cargo fmt --check` stays clean.
+            #[rustfmt::skip]
+            let format = match (
+                vinfo.bits_per_pixel,
+                vinfo.red.offset,
+                vinfo.green.offset,
+                vinfo.blue.offset,
+            ) {
                 (16, 11, 5, 0) => PixelFormat::Rgb565,
                 (32, 16, 8, 0) => PixelFormat::Xrgb8888,
                 (32, 0, 8, 16) => PixelFormat::Xrgb8888,
@@ -485,9 +426,14 @@ mod linux_impl {
 
             tracing::info!(
                 "fb: {}x{} {:?} stride={} fit={}x{}@({},{})",
-                target_w, target_h, format, stride,
-                fit.letterbox.visible_w, fit.letterbox.visible_h,
-                fit.letterbox.dst_x, fit.letterbox.dst_y,
+                target_w,
+                target_h,
+                format,
+                stride,
+                fit.letterbox.visible_w,
+                fit.letterbox.visible_h,
+                fit.letterbox.dst_x,
+                fit.letterbox.dst_y,
             );
 
             Ok(FbBackend {
@@ -501,7 +447,13 @@ mod linux_impl {
         }
 
         pub fn clear(&mut self) {
-            clear_fb(&mut self.mmap[..], self.stride, self.format, self.target_w, self.target_h);
+            clear_fb(
+                &mut self.mmap[..],
+                self.stride,
+                self.format,
+                self.target_w,
+                self.target_h,
+            );
         }
 
         pub fn blit_full(&mut self, src: &RenderFrame) {
@@ -509,7 +461,14 @@ mod linux_impl {
         }
 
         pub fn blit_rect(&mut self, src: &RenderFrame, rect: Rect) {
-            blit_scale_nn_rect(src, &mut self.mmap[..], self.stride, self.format, &self.fit, rect);
+            blit_scale_nn_rect(
+                src,
+                &mut self.mmap[..],
+                self.stride,
+                self.format,
+                &self.fit,
+                rect,
+            );
         }
     }
 
@@ -536,7 +495,11 @@ mod linux_impl {
             }
         }
 
-        let action = SigAction::new(SigHandler::Handler(handler), SaFlags::empty(), SigSet::empty());
+        let action = SigAction::new(
+            SigHandler::Handler(handler),
+            SaFlags::empty(),
+            SigSet::empty(),
+        );
         // SAFETY: handler is async-signal-safe (see above).
         unsafe {
             sigaction(Signal::SIGINT, &action)?;
@@ -547,22 +510,55 @@ mod linux_impl {
 
     /// Main /dev/fb0 render loop. Mirrors `desktop::run_desktop` but writes to
     /// the mmap'd fb instead of a minifb window, and only blits dirty rects.
-    pub fn run_fb(state: Shared, mut rx: broadcast::Receiver<Event>) -> anyhow::Result<()> {
+    pub fn run_fb(
+        state: Shared,
+        config: SharedConfig,
+        rx: broadcast::Receiver<Event>,
+    ) -> anyhow::Result<()> {
+        run_fb_with_fb_info(state, config, rx, None)
+    }
+
+    /// Same as `run_fb`, plus `fb_info` gets populated with panel metrics
+    /// after the fb is opened — used by `/api/status` (Task #5).
+    pub fn run_fb_with_fb_info(
+        state: Shared,
+        config: SharedConfig,
+        mut rx: broadcast::Receiver<Event>,
+        fb_info: Option<std::sync::Arc<parking_lot::RwLock<Option<crate::server::routes::FbInfo>>>>,
+    ) -> anyhow::Result<()> {
         let shutdown = Arc::new(AtomicBool::new(false));
         install_signals(shutdown.clone())?;
 
         // VT first — if this fails, bail before touching the fb.
-        let _vt = VtGuard::enter().map_err(|e| anyhow::anyhow!("VT guard: {e}. Try running as root or granting the user tty access."))?;
+        let _vt = VtGuard::enter().map_err(|e| {
+            anyhow::anyhow!("VT guard: {e}. Try running as root or granting the user tty access.")
+        })?;
 
         let mut fb = FbBackend::open(Path::new("/dev/fb0"))?;
         fb.clear();
+
+        // Publish the detected panel metrics once the fb is up. `/api/status`
+        // reads this under a short read-lock. `FbBackend::fit` already carries
+        // the aspect-preserving scaled size and letterbox offsets, and
+        // `PixelFormat::bytes_per_pixel` × 8 gives the bpp.
+        if let Some(ref h) = fb_info {
+            let bpp = (fb.format.bytes_per_pixel() * 8) as u8;
+            *h.write() = Some(crate::server::routes::FbInfo {
+                panel_w: fb.target_w.max(0) as u32,
+                panel_h: fb.target_h.max(0) as u32,
+                bpp,
+                scaled_w: fb.fit.letterbox.visible_w.max(0) as u32,
+                scaled_h: fb.fit.letterbox.visible_h.max(0) as u32,
+                letterbox_x: fb.fit.letterbox.dst_x.max(0) as u32,
+                letterbox_y: fb.fit.letterbox.dst_y.max(0) as u32,
+            });
+        }
 
         let mut frame = RenderFrame::new(RENDER_W, RENDER_H);
         let mut store = SimStore::new();
         let mut fx = FxStore::new();
         let mut tracker = DirtyTracker::new();
         let mut last_tick = Instant::now();
-        let frame_budget = Duration::from_millis(1000 / TARGET_FPS);
         let mut first_frame = true;
         let started_at_ms = clock::now_ms();
         let mut idle_since_ms: Option<u64> = None;
@@ -572,6 +568,28 @@ mod linux_impl {
             let t0 = Instant::now();
             let now_ms = clock::now_ms();
 
+            // Snapshot per frame under a single short read-lock. Matches the
+            // desktop loop — see src/render/desktop.rs for the pattern.
+            let (
+                fx_limits,
+                walk_speed_px_per_sec,
+                bob_cycle_ms,
+                error_glyph_ms,
+                window_spill_alpha,
+                target_fps,
+            ) = {
+                let c = config.read();
+                (
+                    FxLimits::from_config(&c),
+                    c.walk_speed_px_per_sec,
+                    c.bob_cycle_ms,
+                    c.error_glyph_ms,
+                    c.window_spill_alpha,
+                    c.target_fps as u64,
+                )
+            };
+            let frame_budget = Duration::from_millis(1000 / target_fps.max(1));
+
             let (world, agents) = {
                 let s = state.read();
                 (RenderWorld::from_state(&s, now_ms), s.list_active())
@@ -579,8 +597,7 @@ mod linux_impl {
             for a in &agents {
                 if a.agent_type == "claude" {
                     if let Some(fa) = a.finished_at {
-                        last_session_ended_ms =
-                            Some(last_session_ended_ms.unwrap_or(0).max(fa));
+                        last_session_ended_ms = Some(last_session_ended_ms.unwrap_or(0).max(fa));
                     }
                 }
             }
@@ -597,23 +614,23 @@ mod linux_impl {
             store.reconcile(&world);
             let dt_ms = last_tick.elapsed().as_millis() as u64;
             last_tick = t0;
-            store.tick(dt_ms, now_ms);
-            fx.drain_events(&mut rx, &store, now_ms);
-            fx.tick(now_ms, &mut store);
+            store.tick(dt_ms, now_ms, walk_speed_px_per_sec, bob_cycle_ms);
+            fx.drain_events(&mut rx, &store, now_ms, &fx_limits);
+            fx.tick(now_ms, &mut store, &fx_limits);
 
             // Redraw the whole frame CPU-side (cheap on Pi 1 — we only touch
             // ~900 KB here, the bandwidth win is in NOT writing 3.5 MB of
             // scaled bytes to the fb mmap every frame).
             frame.clear(palette::BG);
-            scene::draw_static_background(&mut frame);
-            scene::effects::draw_below(&mut frame, &fx, &store, now_ms);
+            scene::draw_static_background(&mut frame, window_spill_alpha);
+            scene::effects::draw_below(&mut frame, &fx, &store, now_ms, &fx_limits);
             scene::sim::draw_sims(&mut frame, &store);
             let agent_refs: Vec<&crate::state::Agent> = agents.iter().collect();
-            scene::glyph::draw_glyphs(&mut frame, &store, &agent_refs, &fx, now_ms);
-            scene::effects::draw_above(&mut frame, &fx, &store, now_ms);
+            scene::glyph::draw_glyphs(&mut frame, &store, &agent_refs, &fx, now_ms, error_glyph_ms);
+            scene::effects::draw_above(&mut frame, &fx, &store, now_ms, &fx_limits);
             scene::text::draw_whiteboard(&mut frame, &store, &agent_refs);
-            scene::text::draw_file_ticker(&mut frame, &fx, now_ms);
-            scene::text::draw_bench_flashes(&mut frame, &fx, now_ms);
+            scene::text::draw_file_ticker(&mut frame, &fx, now_ms, &fx_limits);
+            scene::text::draw_bench_flashes(&mut frame, &fx, now_ms, &fx_limits);
             if let Some(since) = idle_since_ms {
                 if now_ms.saturating_sub(since) > 2_000 {
                     scene::text::draw_status_readout(
@@ -653,11 +670,12 @@ mod linux_impl {
 }
 
 #[cfg(all(feature = "fb", target_os = "linux"))]
-pub use linux_impl::{run_fb, FbBackend, VtGuard};
+pub use linux_impl::{run_fb, run_fb_with_fb_info, FbBackend, VtGuard};
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::render::fit::Letterbox;
 
     #[test]
     fn rgb565_pure_colors() {
@@ -692,56 +710,9 @@ mod tests {
         assert_eq!(pack_xrgb8888(0, 0, 0), [0, 0, 0, 0xff]);
     }
 
-    #[test]
-    fn scale_fit_exact_2x_1280x720() {
-        let fit = compute_scale_fit(640, 360, 1280, 720);
-        assert_eq!(fit.letterbox, Letterbox { dst_x: 0, dst_y: 0, visible_w: 1280, visible_h: 720 });
-        // Integer 2x: col_src[0]=0, col_src[1]=0, col_src[2]=1, col_src[3]=1, ...
-        assert_eq!(fit.col_src[0], 0);
-        assert_eq!(fit.col_src[1], 0);
-        assert_eq!(fit.col_src[2], 1);
-        assert_eq!(fit.col_src[3], 1);
-        assert_eq!(*fit.col_src.last().unwrap(), 639);
-        assert_eq!(*fit.row_src.last().unwrap(), 359);
-    }
-
-    #[test]
-    fn scale_fit_exact_3x_1920x1080() {
-        let fit = compute_scale_fit(640, 360, 1920, 1080);
-        assert_eq!(fit.letterbox, Letterbox { dst_x: 0, dst_y: 0, visible_w: 1920, visible_h: 1080 });
-    }
-
-    #[test]
-    fn scale_fit_1024x768_is_pillarbox_free_and_vertically_letterboxed() {
-        // The exact case that motivated this change: a 1024x768 HDMI panel.
-        // 1280-wide content would be clipped; instead, scale 640x360 → 1024x576
-        // and centre vertically with 96-px top/bottom bars.
-        let fit = compute_scale_fit(640, 360, 1024, 768);
-        assert_eq!(fit.letterbox, Letterbox { dst_x: 0, dst_y: 96, visible_w: 1024, visible_h: 576 });
-        // First and last source columns mapped to fill 1024 outputs.
-        assert_eq!(fit.col_src[0], 0);
-        assert_eq!(*fit.col_src.last().unwrap(), 639);
-        assert_eq!(fit.col_src.len(), 1024);
-        assert_eq!(fit.row_src.len(), 576);
-    }
-
-    #[test]
-    fn scale_fit_clamps_both_axes_on_tiny_fb() {
-        // 640x480 target, 16:9 source → width-limited. 640 * 360/640 = 360 → wait,
-        // we want: try_w = 640 * 480 / 360 = 853 > 640, so fall to width-limited.
-        // scaled_w=640, scaled_h = 360 * 640 / 640 = 360.
-        let fit = compute_scale_fit(640, 360, 640, 480);
-        assert_eq!(fit.letterbox, Letterbox { dst_x: 0, dst_y: 60, visible_w: 640, visible_h: 360 });
-    }
-
-    #[test]
-    fn scale_fit_zero_dimensions_safe() {
-        let fit = compute_scale_fit(640, 360, 0, 720);
-        assert_eq!(fit.letterbox.visible_w, 0);
-        assert_eq!(fit.letterbox.visible_h, 0);
-        assert!(fit.col_src.is_empty());
-        assert!(fit.row_src.is_empty());
-    }
+    // scale_fit_* tests were moved to `src/render/fit.rs` along with the
+    // ScaleFit/Letterbox/compute_scale_fit types in Task #5 (so the desktop
+    // backend — which doesn't compile the fb module — can reuse the fit math).
 
     #[test]
     fn bytes_per_pixel_matches_format() {
@@ -803,7 +774,15 @@ mod tests {
         let stride = 4 * 4;
         let mut dst = vec![0u8; stride * 4];
         let fit = compute_scale_fit(2, 1, 4, 4);
-        assert_eq!(fit.letterbox, Letterbox { dst_x: 0, dst_y: 1, visible_w: 4, visible_h: 2 });
+        assert_eq!(
+            fit.letterbox,
+            Letterbox {
+                dst_x: 0,
+                dst_y: 1,
+                visible_w: 4,
+                visible_h: 2
+            }
+        );
         blit_scale_nn(&src, &mut dst, stride, PixelFormat::Xrgb8888, &fit);
 
         // Row 0 (y=0) is letterbox: all zero.
@@ -888,7 +867,14 @@ mod tests {
         let stride = 8 * 4;
         let mut dst = vec![0u8; stride * 8];
         let fit = compute_scale_fit(4, 4, 8, 8);
-        blit_scale_nn_rect(&src, &mut dst, stride, PixelFormat::Xrgb8888, &fit, Rect::new(100, 100, 10, 10));
+        blit_scale_nn_rect(
+            &src,
+            &mut dst,
+            stride,
+            PixelFormat::Xrgb8888,
+            &fit,
+            Rect::new(100, 100, 10, 10),
+        );
         assert!(dst.iter().all(|&b| b == 0));
     }
 

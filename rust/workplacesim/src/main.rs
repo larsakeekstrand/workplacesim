@@ -1,6 +1,9 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::path::PathBuf;
 
 use tracing_subscriber::EnvFilter;
+use workplacesim::config::{self, persist::ConfigSource, SharedConfig};
+use workplacesim::server::{AppState, BuildInfo};
 
 // Guard against an accidental combination that the build system allows at the
 // Cargo level but that produces two renderers in the main() branches below.
@@ -68,6 +71,62 @@ fn seed_demo_agents(state: &workplacesim::server::Shared, n: usize) {
     }
 }
 
+/// Load the runtime config from disk (or defaults), log where it came from,
+/// and wrap it in the shared handle used by state + renderer + server. Kept
+/// separate from each `main()` branch so the three cfg-gated mains don't
+/// duplicate the logging + Arc construction.
+///
+/// Returns `(shared, path, source)` so `AppState` can stash the path (for
+/// persisted POSTs) and the source tag (for `/api/status`). Source deliberately
+/// reflects what we loaded at startup; subsequent POSTs do not update it.
+#[cfg_attr(all(feature = "fb", not(target_os = "linux")), allow(dead_code))]
+fn load_shared_config() -> (SharedConfig, PathBuf, ConfigSource) {
+    use config::persist::{load_or_default, resolve_path};
+
+    let path = resolve_path();
+    let (cfg, source) = load_or_default(&path);
+    match source {
+        ConfigSource::Loaded => {
+            tracing::info!("workplacesim: loaded config from {}", path.display());
+        }
+        ConfigSource::MissingUsedDefaults => {
+            tracing::info!(
+                "workplacesim: no config at {}; using defaults",
+                path.display()
+            );
+        }
+        ConfigSource::CorruptUsedDefaults => {
+            tracing::warn!(
+                "workplacesim: corrupt config at {}; using defaults (fix-up requires /api/config POST)",
+                path.display()
+            );
+        }
+    }
+    (config::shared(cfg), path, source)
+}
+
+/// Assemble the `AppState` shared by every axum handler. Done once per process
+/// so all three `main()` branches construct the bundle identically.
+#[cfg_attr(all(feature = "fb", not(target_os = "linux")), allow(dead_code))]
+fn build_app_state(
+    state: workplacesim::server::Shared,
+    shared_config: SharedConfig,
+    config_path: PathBuf,
+    config_source: ConfigSource,
+) -> AppState {
+    AppState {
+        state,
+        config: shared_config,
+        started_at_ms: workplacesim::state::clock::now_ms(),
+        build: BuildInfo::collect(),
+        config_path,
+        config_source,
+        // Populated by the active renderer (desktop/fb) once it opens its
+        // surface. Server-only builds leave it `None` forever.
+        fb_info: std::sync::Arc::new(parking_lot::RwLock::new(None)),
+    }
+}
+
 #[cfg_attr(all(feature = "fb", not(target_os = "linux")), allow(dead_code))]
 fn bind_addr() -> SocketAddr {
     let port: u16 = std::env::var("PORT")
@@ -114,10 +173,7 @@ async fn shutdown_signal() {
 /// paths. The process exits on window close / SIGINT; cancellation of the
 /// server is acceptable-abrupt for MVP.
 #[cfg(any(feature = "desktop", all(feature = "fb", target_os = "linux")))]
-fn spawn_server(
-    addr: SocketAddr,
-    state: workplacesim::server::Shared,
-) -> std::thread::JoinHandle<anyhow::Result<()>> {
+fn spawn_server(addr: SocketAddr, app: AppState) -> std::thread::JoinHandle<anyhow::Result<()>> {
     std::thread::spawn(move || -> anyhow::Result<()> {
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -130,7 +186,7 @@ fn spawn_server(
             let shutdown = async {
                 let _ = tokio::signal::ctrl_c().await;
             };
-            workplacesim::server::run(addr, state, shutdown).await
+            workplacesim::server::run(addr, app, shutdown).await
         })
     })
 }
@@ -140,7 +196,9 @@ fn main() -> anyhow::Result<()> {
     bootstrap_logging();
     let addr = bind_addr();
 
-    let (state, rx) = workplacesim::state::new_state();
+    let (shared_config, config_path, config_source) = load_shared_config();
+
+    let (state, rx) = workplacesim::state::new_state(shared_config.clone());
     // The render thread owns this receiver; SSE clients subscribe separately
     // via `State::subscribe_events()` when they connect.
 
@@ -148,12 +206,25 @@ fn main() -> anyhow::Result<()> {
         seed_demo_agents(&state, n);
     }
 
+    let app = build_app_state(
+        state.clone(),
+        shared_config.clone(),
+        config_path,
+        config_source,
+    );
+    let fb_info_handle = app.fb_info.clone();
+
     // minifb on macOS requires the main thread for the window (AppKit
     // constraint). Spawn the axum server on a background tokio runtime and
     // run the window loop on the main thread.
-    let _server_thread = spawn_server(addr, state.clone());
+    let _server_thread = spawn_server(addr, app);
 
-    workplacesim::render::desktop::run_desktop(state, rx)?;
+    workplacesim::render::desktop::run_desktop_with_fb_info(
+        state,
+        shared_config,
+        rx,
+        Some(fb_info_handle),
+    )?;
     // Window closed → drop the server thread along with the process. MVP
     // accepts the abrupt shutdown; a proper cancellation channel is a future
     // polish.
@@ -165,13 +236,22 @@ fn main() -> anyhow::Result<()> {
     bootstrap_logging();
     let addr = bind_addr();
 
-    let (state, rx) = workplacesim::state::new_state();
-    let _server_thread = spawn_server(addr, state.clone());
+    let (shared_config, config_path, config_source) = load_shared_config();
+
+    let (state, rx) = workplacesim::state::new_state(shared_config.clone());
+    let app = build_app_state(
+        state.clone(),
+        shared_config.clone(),
+        config_path,
+        config_source,
+    );
+    let fb_info_handle = app.fb_info.clone();
+    let _server_thread = spawn_server(addr, app);
 
     // Renderer runs on the main thread so signal delivery and VtGuard drop
     // order are predictable. `run_fb` installs its own SIGINT/SIGTERM handler
     // and polls a shared flag to exit the loop cleanly.
-    workplacesim::render::fb::run_fb(state, rx)?;
+    workplacesim::render::fb::run_fb_with_fb_info(state, shared_config, rx, Some(fb_info_handle))?;
     std::process::exit(0);
 }
 
@@ -193,11 +273,15 @@ async fn main() -> anyhow::Result<()> {
     bootstrap_logging();
     let addr = bind_addr();
 
-    let (state, _rx) = workplacesim::state::new_state();
+    let (shared_config, config_path, config_source) = load_shared_config();
+
+    let (state, _rx) = workplacesim::state::new_state(shared_config.clone());
     // Server-only branch: holding `_rx` keeps the broadcast channel primed so
     // `Sender::send` doesn't error when there are zero SSE clients connected.
     // Each SSE client spawns its own receiver via `State::subscribe_events()`.
 
+    let app = build_app_state(state, shared_config, config_path, config_source);
+
     tracing::info!("workplacesim listening on http://{addr}");
-    workplacesim::server::run(addr, state, shutdown_signal()).await
+    workplacesim::server::run(addr, app, shutdown_signal()).await
 }

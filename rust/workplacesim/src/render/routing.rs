@@ -551,7 +551,8 @@ mod tests {
             (0usize..meets.len()).prop_map(move |i| Target::Meeting(meets[i])),
             (0usize..labs.len()).prop_map(move |i| Target::Lab(labs[i])),
             (0usize..QUEUE_SPOTS.len()).prop_map(|i| Target::Queue(QUEUE_SPOTS[i])),
-            (0usize..MEETING_QUEUE_SPOTS.len()).prop_map(|i| Target::MeetingQueue(MEETING_QUEUE_SPOTS[i])),
+            (0usize..MEETING_QUEUE_SPOTS.len())
+                .prop_map(|i| Target::MeetingQueue(MEETING_QUEUE_SPOTS[i])),
             (0usize..LAB_QUEUE_SPOTS.len()).prop_map(|i| Target::LabQueue(LAB_QUEUE_SPOTS[i])),
         ]
     }
