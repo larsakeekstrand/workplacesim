@@ -50,7 +50,6 @@ pub const BUILD_BOARD_BG: Rgb = rgb_from_hex(0x10181c);
 
 // Step 6 text + readout palette.
 pub const WHITEBOARD_TEXT: Rgb = rgb_from_hex(0x1a1f28);
-pub const BUILD_BOARD_TEXT: Rgb = rgb_from_hex(0x66ff88);
 pub const TICKER_TEXT: Rgb = rgb_from_hex(0xcfe6ff);
 pub const STATUS_TEXT: Rgb = rgb_from_hex(0xd8d2c5);
 pub const STATUS_PANEL_BG: Rgb = rgb_from_hex(0x1c1510);

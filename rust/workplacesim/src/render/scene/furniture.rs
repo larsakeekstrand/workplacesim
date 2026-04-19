@@ -125,15 +125,6 @@ fn draw_meeting_chair(fb: &mut impl Framebuffer, seat: &MeetingSeat) {
 }
 
 pub fn draw_lab_room(fb: &mut impl Framebuffer) {
-    // BUILD ✓ panel on west wall (step 4a: panel only, text is step 6).
-    // TODO(step 6): render "BUILD\n  ✓" via embedded-graphics.
-    let sg_x = h(LAB_ROOM.x + 8);
-    let sg_y = h(LAB_ROOM.y + LAB_ROOM.h / 2 - 18);
-    let sg_w = h(36);
-    let sg_h = h(36);
-    fb.fill_rect(Rect::new(sg_x, sg_y, sg_w, sg_h), palette::BUILD_BOARD_BG);
-    fb.stroke_rect(Rect::new(sg_x, sg_y, sg_w, sg_h), palette::LED);
-
     // Server rack SE corner.
     let rack_x = h(LAB_ROOM.x + LAB_ROOM.w - 30);
     let rack_y = h(LAB_ROOM.y + LAB_ROOM.h - 70);

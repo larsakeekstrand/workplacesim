@@ -606,7 +606,6 @@ mod linux_impl {
             // scaled bytes to the fb mmap every frame).
             frame.clear(palette::BG);
             scene::draw_static_background(&mut frame);
-            scene::draw_static_text(&mut frame);
             scene::effects::draw_below(&mut frame, &fx, &store, now_ms);
             scene::sim::draw_sims(&mut frame, &store);
             let agent_refs: Vec<&crate::state::Agent> = agents.iter().collect();

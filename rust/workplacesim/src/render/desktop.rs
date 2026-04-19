@@ -88,7 +88,6 @@ pub fn run_desktop(state: Shared, mut rx: broadcast::Receiver<Event>) -> anyhow:
 
         frame.clear(palette::BG);
         scene::draw_static_background(&mut frame);
-        scene::draw_static_text(&mut frame);
         scene::effects::draw_below(&mut frame, &fx, &store, now_ms);
         scene::sim::draw_sims(&mut frame, &store);
         let agent_refs: Vec<&Agent> = agents.iter().collect();

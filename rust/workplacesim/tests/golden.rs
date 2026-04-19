@@ -355,7 +355,6 @@ fn step6_whiteboard_matches_golden() {
     };
     let mut frame = RenderFrame::new(RENDER_W, RENDER_H);
     scene::draw_static_background(&mut frame);
-    scene::draw_static_text(&mut frame);
     scene::sim::draw_sims(&mut frame, &store);
     let agents = [&agent];
     scene::text::draw_whiteboard(&mut frame, &store, &agents);
@@ -381,7 +380,6 @@ fn step6_ticker_matches_golden() {
     });
     let mut frame = RenderFrame::new(RENDER_W, RENDER_H);
     scene::draw_static_background(&mut frame);
-    scene::draw_static_text(&mut frame);
     scene::sim::draw_sims(&mut frame, &store);
     scene::text::draw_file_ticker(&mut frame, &fx, now_ms);
     compare_or_regen(GOLDEN_TICKER_PATH, frame.rgb_bytes());
@@ -453,7 +451,6 @@ fn step6_glyphs_matches_golden() {
     let fx = FxStore::new();
     let mut frame = RenderFrame::new(RENDER_W, RENDER_H);
     scene::draw_static_background(&mut frame);
-    scene::draw_static_text(&mut frame);
     scene::sim::draw_sims(&mut frame, &store);
     let agent_refs: Vec<&Agent> = agents.iter().collect();
     scene::glyph::draw_glyphs(&mut frame, &store, &agent_refs, &fx, now_ms);
@@ -497,7 +494,6 @@ fn step6_bench_matches_golden() {
     });
     let mut frame = RenderFrame::new(RENDER_W, RENDER_H);
     scene::draw_static_background(&mut frame);
-    scene::draw_static_text(&mut frame);
     scene::sim::draw_sims(&mut frame, &store);
     scene::text::draw_bench_flashes(&mut frame, &fx, now_ms);
     compare_or_regen(GOLDEN_BENCH_PATH, frame.rgb_bytes());

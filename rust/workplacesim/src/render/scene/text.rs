@@ -1,7 +1,7 @@
-//! Text surfaces — whiteboard, BUILD panel, file-touch ticker, corner status
-//! readout, and lab-bench monitor flash overlays. Text is rendered via
-//! embedded-graphics' FONT_5X8 / FONT_6X10; all other panel art lives in
-//! scene::furniture or scene::rooms.
+//! Text surfaces — whiteboard, file-touch ticker, corner status readout, and
+//! lab-bench monitor flash overlays. Text is rendered via embedded-graphics'
+//! FONT_5X8 / FONT_6X10; all other panel art lives in scene::furniture or
+//! scene::rooms.
 
 use embedded_graphics::mono_font::{ascii, MonoTextStyle};
 use embedded_graphics::pixelcolor::Rgb888;
@@ -9,7 +9,7 @@ use embedded_graphics::prelude::*;
 use embedded_graphics::text::Text;
 
 use super::super::fx_store::{FxStore, BENCH_FLASH_MS, FILE_TICK_MS};
-use super::super::geometry::{Rect, LAB_ROOM, LAB_STATION_XS, MEETING_ROOM, OPEN_ROOM};
+use super::super::geometry::{Rect, LAB_STATION_XS, MEETING_ROOM, OPEN_ROOM};
 use super::super::palette::{self, Rgb};
 use super::super::sim_store::{SimState, SimStore};
 use super::super::{blend, Framebuffer, RenderFrame};
@@ -78,16 +78,6 @@ pub fn draw_whiteboard(
         style,
     )
     .draw(fb);
-}
-
-pub fn draw_build_board(fb: &mut RenderFrame) {
-    // Mirrors the static panel in draw_lab_room.
-    let sg_x = h(LAB_ROOM.x + 8);
-    let sg_y = h(LAB_ROOM.y + LAB_ROOM.h / 2 - 18);
-    let style = MonoTextStyle::new(&ascii::FONT_6X10, to_rgb888(palette::BUILD_BOARD_TEXT));
-    // FONT_6X10 has no checkmark; spell "OK" on line 2.
-    let _ = Text::new("BUILD", Point::new(sg_x + 1, sg_y + 8), style).draw(fb);
-    let _ = Text::new("  OK", Point::new(sg_x + 1, sg_y + 18), style).draw(fb);
 }
 
 pub fn draw_file_ticker(fb: &mut RenderFrame, fx: &FxStore, now_ms: u64) {
