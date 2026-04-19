@@ -1,0 +1,16 @@
+<?xml version="1.0" standalone='no'?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<service-group>
+  <name replace-wildcards="yes">workplacesim on %h</name>
+  <service>
+    <type>_workplacesim._tcp</type>
+    <port>4317</port>
+    <txt-record>path=/events</txt-record>
+    <txt-record>version=1</txt-record>
+  </service>
+  <service>
+    <type>_http._tcp</type>
+    <port>4317</port>
+    <txt-record>path=/</txt-record>
+  </service>
+</service-group>
