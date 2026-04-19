@@ -7,10 +7,14 @@ as a systemd service that owns `tty1` and draws to `/dev/fb0`.
 
 Edit `/boot/config.txt` (or `/boot/firmware/config.txt` on newer images):
 
-- `framebuffer_depth=32` — 32-bit BGRA framebuffer; matches the renderer.
+- `framebuffer_depth=32` or `framebuffer_depth=16` — renderer auto-detects
+  XRGB8888 (32bpp) and RGB565 (16bpp). Other depths are rejected with a
+  message pointing back at this knob.
 - `hdmi_force_hotplug=1` — keep HDMI output on even without EDID (headless boot).
 - `disable_overscan=1` — no black border around the canvas.
 - Optional: `hdmi_group=2`, `hdmi_mode=82` to force 1080p if autodetect guesses wrong.
+  The renderer scales aspect-preserving nearest-neighbour to any detected
+  resolution with black pillar/letterbox — you don't have to force 1280×720.
 
 Enable SSH (`sudo raspi-config` → Interface Options → SSH) and connect the Pi
 to the same LAN as your Mac.
@@ -87,11 +91,13 @@ sudo systemctl daemon-reload
   `inactive`. The service unit declares `Conflicts=getty@tty1.service`; if
   it isn't honoured, `sudo systemctl stop getty@tty1.service` and restart
   workplacesim.
-- **Wrong resolution.** The renderer logs the framebuffer mode it got from
-  `FBIOGET_VSCREENINFO` on startup. If that differs from what you expected,
-  force `hdmi_group`/`hdmi_mode` in `config.txt`.
+- **Unexpected resolution.** The renderer logs the framebuffer mode from
+  `FBIOGET_VSCREENINFO` on startup (e.g.
+  `fb: 1024x768 Rgb565 stride=2048 fit=1024x576@(0,96)`). Any resolution is
+  fine — the scaler preserves aspect ratio with pillarbox/letterbox. Only
+  force `hdmi_group`/`hdmi_mode` if you specifically want a different mode.
 - **Hook POSTs not landing.** Verify `WORKPLACESIM_URL` on the Mac and that
-  the Pi's port 4317 is reachable (`curl http://<host>:4317/health` should
-  return 200). Check LAN firewall rules.
+  the Pi's port 4317 is reachable (`curl http://<host>:4317/api/agents`
+  should return `{"agents":[...]}`). Check LAN firewall rules.
 - **Service flapping.** `Restart=always, RestartSec=2` will keep restarting
   on crash. `journalctl -u workplacesim -n 200` for the panic trail.
