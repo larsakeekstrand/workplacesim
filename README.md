@@ -34,9 +34,10 @@ repo as a one-plugin marketplace:
 /plugin install workplacesim
 ```
 
-**Restart Claude Code after installing.** The plugin registers eight hook
-subscriptions; `/reload-plugins` is not enough to activate new event
-subscriptions. After restart, `/workplacesim` checks the visualizer's status.
+**Restart Claude Code after installing.** The plugin registers eleven hook
+subscriptions across eight Claude Code events; `/reload-plugins` is not
+enough to activate new event subscriptions. After restart, `/workplacesim`
+checks the visualizer's status.
 
 To point the plugin at a visualizer running on another host, set
 `WORKPLACESIM_URL=http://<host>:4317` in the environment Claude Code runs in.
@@ -118,19 +119,28 @@ halls at x=130 and x=776, horizontal corridors at y=125/256/416/576.
 A Rust port in `rpi/workplacesim/` renders the scene directly to
 `/dev/fb0` on a Raspberry Pi 1 (ARMv6) — no browser, no X, no Node.
 Plug the Pi into a TV via HDMI, deploy the binary as a systemd
-service, point Claude Code's hooks at it over the LAN:
+service, and point Claude Code's hooks at it over the LAN.
+
+Flash the SD card with **Raspberry Pi OS Lite** via `rpi-imager`
+(https://www.raspberrypi.com/software/) — its Advanced Options dialog
+preseeds hostname, authorized SSH key, wifi SSID/PSK, and locale. Then
+from this repo on macOS:
 
 ```sh
-# From this repo on macOS (needs: Docker, cargo install cross):
+# needs: Docker running, cargo install cross
 cd rpi/workplacesim
-./deploy/install.sh pi@raspberrypi.local
+./deploy/install.sh pi@workplacesim.local
 # On the Mac where Claude Code runs:
-export WORKPLACESIM_URL=http://raspberrypi.local:4317
+export WORKPLACESIM_URL=http://workplacesim.local:4317
 ```
 
 The Rust binary is a drop-in for the Node server: same HTTP+SSE
 protocol, same payloads, same `/events` and `/` routes (so a browser
-at `http://<pi>:4317/` still shows the Phaser frontend for debug).
+at `http://<pi>:4317/` still shows the Phaser frontend for debug). It
+also runs an in-process mDNS responder that announces
+`_workplacesim._tcp`, so the Pi is reachable at `<hostname>.local:4317`
+without `avahi-daemon` on the Pi.
+
 Dev on macOS runs windowed via:
 
 ```sh
@@ -140,9 +150,14 @@ cargo run --features desktop --no-default-features --bin workplacesim
 cargo run --features desktop --no-default-features --bin workplacesim -- --demo 3
 ```
 
-See `rpi/workplacesim/deploy/README.md` for Pi config knobs
-(`framebuffer_depth=32`, getty disable, logs, uninstall, non-root
-operation).
+Live tuning: open `http://<pi>:4317/config` on any device on the same
+LAN. Motion, effect density, lifecycle TTLs, and display settings are
+editable through the page and persist to disk.
+
+See `rpi/workplacesim/deploy/README.md` for the full rpi-imager
+walkthrough, the one-time Pi setup (passwordless sudo,
+`framebuffer_depth=32`, getty disable), deploy flags, troubleshooting,
+and uninstall.
 
 ## Smoke test (single agent, no plugin)
 
