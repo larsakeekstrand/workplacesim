@@ -100,7 +100,7 @@ if autodetect picks the wrong resolution.
 ## Run `install.sh`
 
 ```sh
-cd rust/workplacesim
+cd rpi/workplacesim
 ./deploy/install.sh pi@workplacesim.local
 ```
 

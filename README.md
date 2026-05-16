@@ -115,14 +115,14 @@ halls at x=130 and x=776, horizontal corridors at y=125/256/416/576.
 
 ## Running on a Raspberry Pi (no browser)
 
-A Rust port in `rust/workplacesim/` renders the scene directly to
+A Rust port in `rpi/workplacesim/` renders the scene directly to
 `/dev/fb0` on a Raspberry Pi 1 (ARMv6) — no browser, no X, no Node.
 Plug the Pi into a TV via HDMI, deploy the binary as a systemd
 service, point Claude Code's hooks at it over the LAN:
 
 ```sh
 # From this repo on macOS (needs: Docker, cargo install cross):
-cd rust/workplacesim
+cd rpi/workplacesim
 ./deploy/install.sh pi@raspberrypi.local
 # On the Mac where Claude Code runs:
 export WORKPLACESIM_URL=http://raspberrypi.local:4317
@@ -134,13 +134,13 @@ at `http://<pi>:4317/` still shows the Phaser frontend for debug).
 Dev on macOS runs windowed via:
 
 ```sh
-cd rust/workplacesim
+cd rpi/workplacesim
 cargo run --features desktop --no-default-features --bin workplacesim
 # or with seeded demo sims:
 cargo run --features desktop --no-default-features --bin workplacesim -- --demo 3
 ```
 
-See `rust/workplacesim/deploy/README.md` for Pi config knobs
+See `rpi/workplacesim/deploy/README.md` for Pi config knobs
 (`framebuffer_depth=32`, getty disable, logs, uninstall, non-root
 operation).
 

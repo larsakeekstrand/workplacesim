@@ -22,12 +22,12 @@ whiteboard) react to every tool call and lifecycle signal.
 - **Simulator** `scripts/simulate.js` — zero-dep Node script that POSTs fake
   traffic exercising every feature; useful for working on the frontend
   without real Claude sessions.
-- **Rust port** `rust/workplacesim/` — additive; not required for the
+- **Rust port** `rpi/workplacesim/` — additive; not required for the
   browser path. Speaks the exact HTTP+SSE protocol and renders the same
   scene directly to `/dev/fb0` on a Raspberry Pi 1, with a minifb
   desktop backend for Mac dev. Default Cargo features are `[]`; pick
   one of `--features desktop` (Mac window) or `--features fb` (Linux
-  framebuffer, Pi). Deploy via `rust/workplacesim/deploy/install.sh
+  framebuffer, Pi). Deploy via `rpi/workplacesim/deploy/install.sh
   pi@host`. Hooks on the Mac point at the Pi via
   `WORKPLACESIM_URL=http://<pi>:4317`. Live tuning via `/config`
   (browser), backed by a JSON file resolved from
@@ -49,7 +49,7 @@ workplacesim/
   server/{index,state}.js
   public/{index.html,main.js,picker.html,assets/kenney-1bit/…}
   scripts/simulate.js
-  rust/workplacesim/              # Rust port for Raspberry Pi 1 / framebuffer
+  rpi/workplacesim/               # Rust port for Raspberry Pi 1 / framebuffer
     src/{state,server,render}/…   # state.js + index.js + public/main.js ports
     deploy/{install.sh,workplacesim.service,README.md}
     tests/golden/*.raw            # byte-identical rendering regression tests
@@ -205,5 +205,5 @@ npm run simulate -- --plan-ratio=0.3 --max-concurrent=6
   semantics, SSE event shape) need to land in **both** the Node backend
   and the Rust port. The Rust crate has unit + golden-frame + HTTP
   integration tests that will catch drift; run `cargo test --features
-  desktop --no-default-features` from `rust/workplacesim/` after any
+  desktop --no-default-features` from `rpi/workplacesim/` after any
   such change. Parity is the contract.
