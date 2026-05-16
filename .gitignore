@@ -3,4 +3,3 @@ node_modules/
 *.log
 .claude/settings.local.json
 rust/**/target/
-rust/workplacesim/deploy/*.img
