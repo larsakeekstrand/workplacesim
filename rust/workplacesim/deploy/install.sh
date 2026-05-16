@@ -2,15 +2,25 @@
 set -euo pipefail
 
 # Cross-build workplacesim for Pi 1 (armv6, hard-float) and install it as a
-# systemd service over SSH. Target must already have sshd running and the
-# invoking user's key in authorized_keys.
+# systemd service on Raspberry Pi OS Lite (Bookworm) over SSH. Assumes the Pi
+# was provisioned with rpi-imager's Advanced Options: SSH enabled with the
+# invoking user's pubkey authorized for the login user, hostname + wifi +
+# locale + timezone preseeded. This script does not touch any of that.
 
 usage() {
-    printf 'usage: %s <user>@<host> [--status-only] [--hostname <name>] [--skip-hostname]\n' "${0##*/}" >&2
-    printf '  <user>@<host>     target Pi, e.g. pi@raspberrypi.local\n' >&2
-    printf '  --status-only     skip build+copy, just show service status + recent logs\n' >&2
-    printf '  --hostname <name> set Pi hostname so clients reach it at <name>.local (default: workplacesim)\n' >&2
-    printf '  --skip-hostname   leave the Pi hostname untouched; still install avahi service file\n' >&2
+    cat >&2 <<EOF
+usage: ${0##*/} <target> [--status-only] [--hostname <name>] [--skip-hostname] [--user <user>]
+  <target>          target Pi as either "user@host" or bare "host"
+                    bare "host" is prefixed with --user (default: pi)
+                    examples: pi@workplacesim.local
+                              workplacesim.local            (uses pi@)
+                              workplacesim.local --user me  (uses me@)
+  --status-only     skip build+copy, just show service status + recent logs
+  --hostname <name> set the Pi's hostname before installing the service
+                    (default: do NOT touch hostname; trust Pi Imager's setting)
+  --skip-hostname   alias for the default; left in for backward compat
+  --user <user>     SSH login user when <target> is bare host (default: pi)
+EOF
     exit 2
 }
 
@@ -22,32 +32,44 @@ TARGET="$1"
 shift || true
 
 STATUS_ONLY=0
-DESIRED_HOSTNAME="workplacesim"
+DESIRED_HOSTNAME=""
+SET_HOSTNAME=0
 SKIP_HOSTNAME=0
+DEFAULT_USER="pi"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --status-only) STATUS_ONLY=1 ;;
         --hostname)
             shift || { printf 'error: --hostname requires a value\n' >&2; usage; }
             DESIRED_HOSTNAME="$1"
+            SET_HOSTNAME=1
             ;;
         --skip-hostname) SKIP_HOSTNAME=1 ;;
+        --user)
+            shift || { printf 'error: --user requires a value\n' >&2; usage; }
+            DEFAULT_USER="$1"
+            ;;
         -h|--help) usage ;;
         *) printf 'unknown argument: %s\n' "$1" >&2; usage ;;
     esac
     shift
 done
 
+# If --skip-hostname was passed alongside --hostname, --skip-hostname wins
+# (matches old behaviour: be conservative).
+if [[ "${SKIP_HOSTNAME}" -eq 1 ]]; then
+    SET_HOSTNAME=0
+fi
+
+# Normalise target: accept "user@host" verbatim, otherwise prepend "${DEFAULT_USER}@".
 if [[ "${TARGET}" != *"@"* ]]; then
-    printf 'error: target must be <user>@<host>, got: %s\n' "${TARGET}" >&2
-    usage
+    TARGET="${DEFAULT_USER}@${TARGET}"
 fi
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 CRATE_DIR="$(cd -- "${SCRIPT_DIR}/.." &>/dev/null && pwd)"
 REPO_ROOT="$(cd -- "${CRATE_DIR}/../.." &>/dev/null && pwd)"
 UNIT_FILE="${SCRIPT_DIR}/workplacesim.service"
-AVAHI_FILE="${SCRIPT_DIR}/workplacesim.avahi-service"
 BIN_REL="target/arm-unknown-linux-gnueabihf/release/workplacesim"
 BIN_ABS="${CRATE_DIR}/${BIN_REL}"
 
@@ -69,11 +91,6 @@ done
 
 if ! [[ -f "${UNIT_FILE}" ]]; then
     printf 'error: service unit not found at %s\n' "${UNIT_FILE}" >&2
-    exit 1
-fi
-
-if ! [[ -f "${AVAHI_FILE}" ]]; then
-    printf 'error: avahi service file not found at %s\n' "${AVAHI_FILE}" >&2
     exit 1
 fi
 
@@ -100,17 +117,11 @@ printf 'built %s bytes; copying to %s\n' "${BIN_SIZE}" "${TARGET}"
 
 scp -q -- "${BIN_ABS}" "${TARGET}:/tmp/workplacesim.new"
 scp -q -- "${UNIT_FILE}" "${TARGET}:/tmp/workplacesim.service"
-scp -q -- "${AVAHI_FILE}" "${TARGET}:/tmp/workplacesim.avahi-service"
 
-ssh "${TARGET}" "DESIRED_HOSTNAME='${DESIRED_HOSTNAME}' SKIP_HOSTNAME='${SKIP_HOSTNAME}' bash -se" <<'REMOTE'
+ssh "${TARGET}" "DESIRED_HOSTNAME='${DESIRED_HOSTNAME}' SET_HOSTNAME='${SET_HOSTNAME}' bash -se" <<'REMOTE'
 set -euo pipefail
 
-if ! dpkg -s avahi-daemon >/dev/null 2>&1; then
-    sudo apt-get update -qq
-    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y avahi-daemon
-fi
-
-if [[ "${SKIP_HOSTNAME}" != "1" ]]; then
+if [[ "${SET_HOSTNAME}" == "1" && -n "${DESIRED_HOSTNAME}" ]]; then
     current="$(hostname)"
     if [[ "${current}" != "${DESIRED_HOSTNAME}" ]]; then
         sudo hostnamectl set-hostname "${DESIRED_HOSTNAME}"
@@ -126,29 +137,41 @@ if [[ "${SKIP_HOSTNAME}" != "1" ]]; then
     fi
 fi
 
-sudo install -m 0644 /tmp/workplacesim.avahi-service /etc/avahi/services/workplacesim.service
-sudo systemctl enable --now avahi-daemon
-# Must be restart, not reload: SIGHUP re-reads /etc/avahi/services/* but does
-# not re-read the system hostname. After a hostnamectl change avahi keeps
-# advertising the previous name until the daemon actually re-execs.
-sudo systemctl restart avahi-daemon
-
+# Install binary + unit.
 sudo install -m 0755 /tmp/workplacesim.new /usr/local/bin/workplacesim
 sudo install -m 0644 /tmp/workplacesim.service /etc/systemd/system/workplacesim.service
+
+# Belt-and-suspenders: the unit declares Conflicts=getty@tty1.service which
+# stops it on activation, but disabling outright keeps it from coming back
+# on the next boot and racing for the framebuffer.
+sudo systemctl disable --now getty@tty1.service || true
+
+# If avahi-daemon is installed and enabled, it will conflict with the
+# binary's in-process mDNS responder (both binding UDP/5353). Disable it
+# but do not purge — the user may want it back for other reasons.
+if systemctl list-unit-files avahi-daemon.service >/dev/null 2>&1 \
+   && systemctl is-enabled avahi-daemon.service >/dev/null 2>&1; then
+    printf 'warning: avahi-daemon is enabled; disabling so it does not collide with the in-binary mDNS responder\n' >&2
+    sudo systemctl disable --now avahi-daemon.service || true
+    sudo systemctl disable --now avahi-daemon.socket || true
+fi
+
 sudo systemctl daemon-reload
-sudo systemctl enable workplacesim.service
-sudo systemctl restart workplacesim.service
+sudo systemctl enable --now workplacesim.service
 sleep 1
 sudo systemctl status --no-pager --lines 10 workplacesim.service || true
-rm -f -- /tmp/workplacesim.new /tmp/workplacesim.service /tmp/workplacesim.avahi-service
+echo
+sudo journalctl -u workplacesim -n 10 --no-pager || true
+
+rm -f -- /tmp/workplacesim.new /tmp/workplacesim.service
 REMOTE
 
 printf 'deployed workplacesim to %s\n' "${TARGET}"
 
-if [[ "${SKIP_HOSTNAME}" == "1" ]]; then
-    ADVERTISED_HOST="$(ssh "${TARGET}" 'hostname' 2>/dev/null || echo "${DESIRED_HOSTNAME}")"
-else
+if [[ "${SET_HOSTNAME}" == "1" && -n "${DESIRED_HOSTNAME}" ]]; then
     ADVERTISED_HOST="${DESIRED_HOSTNAME}"
+else
+    ADVERTISED_HOST="$(ssh "${TARGET}" 'hostname' 2>/dev/null || echo workplacesim)"
 fi
 
 printf '\nPoint Claude Code hooks at the Pi by adding this to your shell rc:\n'
