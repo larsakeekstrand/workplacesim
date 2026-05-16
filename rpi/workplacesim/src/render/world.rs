@@ -9,9 +9,17 @@
 
 use crate::state::{Agent, State};
 
+/// Active-visit field on `AgentView`. The renderer treats a Some value as a
+/// transient room override the same way `glyph.rs` does: visit beats classify.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct VisitView {
+    pub room: String,
+    pub until: u64,
+}
+
 /// One agent, cloned out of `State::active_agents` with just the fields the
-/// renderer reads. Keeps the snapshot small (no `session_prompt`, `visit`,
-/// etc. for now — those belong to later sub-steps).
+/// renderer reads. `visit` lives here so `sim_store::reconcile` can drive a
+/// lab walk-out / return without a second pass over `&[&Agent]`.
 #[derive(Clone, Debug)]
 pub struct AgentView {
     pub agent_id: String,
@@ -23,6 +31,7 @@ pub struct AgentView {
     pub started_at: u64,
     pub finished_at: Option<u64>,
     pub session_label: Option<String>,
+    pub visit: Option<VisitView>,
 }
 
 impl From<&Agent> for AgentView {
@@ -37,6 +46,10 @@ impl From<&Agent> for AgentView {
             started_at: a.started_at,
             finished_at: a.finished_at,
             session_label: a.session_label.clone(),
+            visit: a.visit.as_ref().map(|v| VisitView {
+                room: v.room.clone(),
+                until: v.until,
+            }),
         }
     }
 }

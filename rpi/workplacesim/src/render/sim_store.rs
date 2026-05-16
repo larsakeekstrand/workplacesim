@@ -15,7 +15,7 @@ use super::geometry::{
 };
 use super::palette::hash_str;
 use super::routing::{compute_route, path_to_door_from, Target};
-use super::world::RenderWorld;
+use super::world::{AgentView, RenderWorld};
 
 // Walk speed, min-segment, and bob cycle now live on `Config` (see
 // `crate::config`). These used to be module-level consts; Task #2 of the
@@ -77,6 +77,30 @@ fn allocate_in(slots: &mut [Option<String>], agent_id: &str) -> Option<usize> {
         }
     }
     None
+}
+
+/// Map a visit room string from the server's wire format to a `Room`. The
+/// server emits "test" / "meeting" / "desk"; anything else is treated as no
+/// override so a malformed payload can't strand a sim in a wrong room.
+fn room_from_visit(room: &str) -> Option<Room> {
+    match room {
+        "test" => Some(Room::Lab),
+        "meeting" => Some(Room::Meeting),
+        "desk" => Some(Room::Desk),
+        _ => None,
+    }
+}
+
+/// Where the sim should be *right now* given its agent record. Visit, when
+/// present, beats classify so a desk sim called into the lab walks there even
+/// if classify still says Desk. Mirrors JS `visitTo` / `classify` priority.
+fn desired_room(a: &AgentView) -> Room {
+    if let Some(v) = a.visit.as_ref() {
+        if let Some(r) = room_from_visit(&v.room) {
+            return r;
+        }
+    }
+    classify(&a.agent_type, &a.description, &a.permission_mode)
 }
 
 /// A target resolved into a concrete position. For MVP, overflow queues fold
@@ -188,7 +212,7 @@ impl SimStore {
             if a.finished_at.is_some() {
                 continue;
             }
-            let room = classify(&a.agent_type, &a.description, &a.permission_mode);
+            let room = desired_room(a);
             let overflow_hash = hash_str(&a.agent_id);
             let seat = self.seats.allocate(room, &a.agent_id);
             let target = target_for(room, seat, overflow_hash);
@@ -216,6 +240,35 @@ impl SimStore {
                 session_label: a.session_label.clone(),
             };
             self.anim.insert(a.agent_id.clone(), sim);
+        }
+
+        // 1b. Live transitions. A sim's `room` is set once at spawn, but
+        // `permission_mode` and `visit` can flip mid-life: plan-mode toggles
+        // emit Reclassify, `/hooks/lab-visit` emits Visit. Drive both via the
+        // snapshot rather than reacting to events directly — drops in the
+        // broadcast channel can't strand a sim in the wrong room.
+        for a in &world.agents {
+            if a.finished_at.is_some() {
+                continue;
+            }
+            let Some(sim) = self.anim.get(&a.agent_id) else {
+                continue;
+            };
+            if matches!(sim.state, SimState::WalkingOut | SimState::Gone) {
+                continue;
+            }
+            // Keep `permission_mode` synced even when the room hasn't changed
+            // — the body-draw badge ("plan" → blue dot) reads it directly.
+            if sim.permission_mode != a.permission_mode {
+                if let Some(sim) = self.anim.get_mut(&a.agent_id) {
+                    sim.permission_mode = a.permission_mode.clone();
+                }
+            }
+            let target_room = desired_room(a);
+            if self.anim[&a.agent_id].room == target_room {
+                continue;
+            }
+            self.start_room_transition(&a.agent_id, target_room);
         }
 
         // 2. Mark newly-finished sims as walking out.
@@ -308,6 +361,42 @@ impl SimStore {
     pub fn iter(&self) -> impl Iterator<Item = &SimAnim> {
         self.anim.values()
     }
+
+    /// Kick off a walk to `target_room` for an in-scene sim. Releases the old
+    /// seat, allocates one in the new room (or falls through to a queue spot),
+    /// and replaces the path from the sim's current `(x, y)`. The sim stays
+    /// `WalkingIn` until `tick` runs the path out; the existing seated→walking
+    /// transition logic in `tick` does the rest.
+    ///
+    /// No-op if the sim isn't present or is already on its way out.
+    fn start_room_transition(&mut self, agent_id: &str, target_room: Room) {
+        // Release the old seat before allocating — a Desk↔Desk visit-return
+        // could otherwise fail to find a slot when the seat pool is full.
+        let (old_seat, overflow_hash, cx, cy) = {
+            let Some(sim) = self.anim.get(agent_id) else {
+                return;
+            };
+            if matches!(sim.state, SimState::WalkingOut | SimState::Gone) {
+                return;
+            }
+            (sim.seat, sim.overflow_hash, sim.x, sim.y)
+        };
+        if let Some(s) = old_seat {
+            self.seats.release(s);
+        }
+        let new_seat = self.seats.allocate(target_room, agent_id);
+        let target = target_for(target_room, new_seat, overflow_hash);
+        let path = compute_route(Point::new(cx as i32, cy as i32), &target);
+        let Some(sim) = self.anim.get_mut(agent_id) else {
+            return;
+        };
+        sim.seat = new_seat;
+        sim.room = target_room;
+        sim.is_lab = matches!(target_room, Room::Lab);
+        sim.path = path;
+        sim.state = SimState::WalkingIn;
+        sim.seated_since_ms = None;
+    }
 }
 
 /// Walk a sim toward its next waypoint. If it reaches it, pop and keep moving
@@ -373,6 +462,7 @@ mod tests {
             started_at,
             finished_at,
             session_label: None,
+            visit: None,
         }
     }
 
@@ -593,5 +683,183 @@ mod tests {
         store.reconcile(&world(agents, 0));
         assert_eq!(store.anim.len(), 13);
         assert!(store.anim["a12"].seat.is_none(), "overflow has no seat");
+    }
+
+    fn agent_with_visit(
+        id: &str,
+        mode: &str,
+        visit_room: Option<&str>,
+    ) -> AgentView {
+        AgentView {
+            agent_id: id.into(),
+            session_id: None,
+            user: "u".into(),
+            agent_type: "coder".into(),
+            description: String::new(),
+            permission_mode: mode.into(),
+            started_at: 0,
+            finished_at: None,
+            session_label: None,
+            visit: visit_room.map(|r| crate::render::world::VisitView {
+                room: r.into(),
+                until: u64::MAX,
+            }),
+        }
+    }
+
+    // Drive `tick` long enough that any path lands on Seated. The longest path
+    // in the scene is far less than 30 s at default walk speed.
+    fn settle(store: &mut SimStore, now_start_ms: u64) -> u64 {
+        let dt = 200u64;
+        let mut t = now_start_ms;
+        for _ in 0..200 {
+            t += dt;
+            store.tick(dt, t, WALK_SPEED_PX_PER_SEC, BOB_CYCLE_MS);
+        }
+        t
+    }
+
+    #[test]
+    fn plan_mode_flip_walks_to_meeting() {
+        let mut store = SimStore::new();
+        let a = agent("a1", "u", "coder", "default", 0, None);
+        store.reconcile(&world(vec![a], 0));
+        let t = settle(&mut store, 0);
+        assert_eq!(store.anim["a1"].room, Room::Desk);
+        assert_eq!(store.anim["a1"].state, SimState::Seated);
+        let old_seat = store.anim["a1"].seat;
+        assert!(matches!(old_seat, Some(SeatId::Desk(_))));
+
+        // Plan mode flips: the agent record's permission_mode is "plan".
+        let a2 = agent("a1", "u", "coder", "plan", 0, None);
+        store.reconcile(&world(vec![a2], t));
+        // Transition started: WalkingIn toward meeting.
+        assert_eq!(store.anim["a1"].room, Room::Meeting);
+        assert_eq!(store.anim["a1"].state, SimState::WalkingIn);
+        assert!(matches!(store.anim["a1"].seat, Some(SeatId::Meeting(_))));
+        // Old desk seat released.
+        assert!(store.seats.holder(old_seat.unwrap()).is_none());
+
+        let t2 = settle(&mut store, t);
+        assert_eq!(store.anim["a1"].state, SimState::Seated);
+        assert_eq!(store.anim["a1"].room, Room::Meeting);
+        let _ = t2;
+    }
+
+    #[test]
+    fn plan_mode_off_walks_back_to_desk() {
+        let mut store = SimStore::new();
+        let a = agent("a1", "u", "coder", "plan", 0, None);
+        store.reconcile(&world(vec![a], 0));
+        let t = settle(&mut store, 0);
+        assert_eq!(store.anim["a1"].room, Room::Meeting);
+
+        let a2 = agent("a1", "u", "coder", "default", 0, None);
+        store.reconcile(&world(vec![a2], t));
+        assert_eq!(store.anim["a1"].room, Room::Desk);
+        assert_eq!(store.anim["a1"].state, SimState::WalkingIn);
+
+        let _ = settle(&mut store, t);
+        assert_eq!(store.anim["a1"].state, SimState::Seated);
+        assert_eq!(store.anim["a1"].room, Room::Desk);
+    }
+
+    #[test]
+    fn visit_walks_to_lab_then_returns() {
+        let mut store = SimStore::new();
+        let a = agent("a1", "u", "coder", "default", 0, None);
+        store.reconcile(&world(vec![a], 0));
+        let t = settle(&mut store, 0);
+        let home_seat = store.anim["a1"].seat;
+        assert!(matches!(home_seat, Some(SeatId::Desk(_))));
+
+        // Visit arrives → walk to lab.
+        let visiting = agent_with_visit("a1", "default", Some("test"));
+        store.reconcile(&world(vec![visiting], t));
+        assert_eq!(store.anim["a1"].room, Room::Lab);
+        assert_eq!(store.anim["a1"].state, SimState::WalkingIn);
+        assert!(matches!(store.anim["a1"].seat, Some(SeatId::Lab(_))));
+        let t = settle(&mut store, t);
+        assert_eq!(store.anim["a1"].state, SimState::Seated);
+
+        // Visit cleared → walk back to desk.
+        let post = agent("a1", "u", "coder", "default", 0, None);
+        store.reconcile(&world(vec![post], t));
+        assert_eq!(store.anim["a1"].room, Room::Desk);
+        assert_eq!(store.anim["a1"].state, SimState::WalkingIn);
+        let _ = settle(&mut store, t);
+        assert_eq!(store.anim["a1"].room, Room::Desk);
+        assert_eq!(store.anim["a1"].state, SimState::Seated);
+    }
+
+    #[test]
+    fn visit_during_plan_mode_returns_to_meeting() {
+        let mut store = SimStore::new();
+        let a = agent("a1", "u", "coder", "plan", 0, None);
+        store.reconcile(&world(vec![a], 0));
+        let t = settle(&mut store, 0);
+        assert_eq!(store.anim["a1"].room, Room::Meeting);
+
+        // Visit to lab.
+        let visiting = agent_with_visit("a1", "plan", Some("test"));
+        store.reconcile(&world(vec![visiting], t));
+        assert_eq!(store.anim["a1"].room, Room::Lab);
+        let t = settle(&mut store, t);
+        assert_eq!(store.anim["a1"].state, SimState::Seated);
+
+        // Visit ends → returns to meeting because plan mode is sticky.
+        let post = agent("a1", "u", "coder", "plan", 0, None);
+        store.reconcile(&world(vec![post], t));
+        assert_eq!(store.anim["a1"].room, Room::Meeting);
+    }
+
+    #[test]
+    fn reclassify_while_walking_recomputes_to_new_target() {
+        // Sim is mid-walk to Desk when plan-mode flips. Reconcile must
+        // override the in-flight path with a Meeting route, not append.
+        let mut store = SimStore::new();
+        let a = agent("a1", "u", "coder", "default", 0, None);
+        store.reconcile(&world(vec![a], 0));
+        // Tick just a hair so the sim has moved a bit but isn't seated.
+        store.tick(200, 200, WALK_SPEED_PX_PER_SEC, BOB_CYCLE_MS);
+        assert_eq!(store.anim["a1"].state, SimState::WalkingIn);
+        let path_before = store.anim["a1"].path.clone();
+
+        let a2 = agent("a1", "u", "coder", "plan", 0, None);
+        store.reconcile(&world(vec![a2], 300));
+        assert_eq!(store.anim["a1"].room, Room::Meeting);
+        // Path replaced, not extended: last waypoint is now a meeting seat.
+        assert_ne!(store.anim["a1"].path, path_before);
+        let _ = settle(&mut store, 300);
+        assert_eq!(store.anim["a1"].room, Room::Meeting);
+        assert_eq!(store.anim["a1"].state, SimState::Seated);
+    }
+
+    #[test]
+    fn permission_mode_synced_even_when_room_unchanged() {
+        // Lab keyword wins over plan, so toggling plan-mode on a lab sim does
+        // NOT change the room — but the `permission_mode` field still drives
+        // the body-draw badge, so it must mirror the agent record.
+        let mut store = SimStore::new();
+        let a = agent("a1", "u", "verifier", "default", 0, None);
+        store.reconcile(&world(vec![a], 0));
+        assert_eq!(store.anim["a1"].room, Room::Lab);
+        assert_eq!(store.anim["a1"].permission_mode, "default");
+        let a2 = agent("a1", "u", "verifier", "plan", 0, None);
+        store.reconcile(&world(vec![a2], 100));
+        assert_eq!(store.anim["a1"].room, Room::Lab);
+        assert_eq!(store.anim["a1"].permission_mode, "plan");
+    }
+
+    #[test]
+    fn malformed_visit_room_is_ignored() {
+        let mut store = SimStore::new();
+        let a = agent("a1", "u", "coder", "default", 0, None);
+        store.reconcile(&world(vec![a], 0));
+        let _ = settle(&mut store, 0);
+        let bogus = agent_with_visit("a1", "default", Some("kitchen"));
+        store.reconcile(&world(vec![bogus], 1_000));
+        // Unknown visit string → fall back to classify → stays at desk.
+        assert_eq!(store.anim["a1"].room, Room::Desk);
     }
 }
