@@ -29,6 +29,10 @@ pub struct Agent {
     pub idle: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_error: Option<CurrentError>,
+    // Single legible char shared across every sim from the same Claude
+    // session so concurrent sessions read apart at a glance.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_label: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Default, PartialEq, Eq)]

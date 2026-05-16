@@ -179,6 +179,7 @@ mod tests {
             seated_since_ms: seated_since,
             overflow_hash: 0,
             last_footstep_ms: 0,
+            session_label: None,
         }
     }
 

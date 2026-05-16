@@ -93,6 +93,10 @@ the session sim cleanly.
 - **Tool-call motes** — tiny pixel dots drift up from a sim's head on each
   tool call, color-coded by tool family (Read=blue, Write=amber, Bash=green,
   Agent=magenta, Web=purple).
+- **Chest labels** — a single character on each sim's torso tying it to a
+  Claude Code session. The main session sim and all its subagents share
+  the same char; two Claude instances running concurrently get different
+  chars, so you can tell which session owns which sims at a glance.
 
 ### Dispatch surfaces
 

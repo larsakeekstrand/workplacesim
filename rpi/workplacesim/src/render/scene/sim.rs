@@ -108,6 +108,103 @@ fn draw_sim<F: Framebuffer>(fb: &mut F, sim: &SimAnim) {
         // Upper-left of body.
         fb.fill_rect(Rect::new(cx - body_w / 2 + 1, body_y + 1, 1, 1), c);
     }
+
+    // Chest label — one legible char per Claude session, painted with a 1-px
+    // black contour so it reads against any shirt color.
+    draw_session_label(fb, sim, cx, body_y, body_h);
+}
+
+// 3x5 pixel font, just the legible-pool chars from `state::SESSION_LABEL_POOL`.
+// `.` is bg, `#` is fg. Drawn once in black at the four ±1 neighbours so the
+// outline survives shirt colour, then once in white on top.
+fn label_glyph(c: char) -> Option<&'static [&'static str; 5]> {
+    Some(match c {
+        '1' => &[".#.", "##.", ".#.", ".#.", "###"],
+        '2' => &["##.", "..#", ".#.", "#..", "###"],
+        '3' => &["##.", "..#", ".#.", "..#", "##."],
+        '4' => &["#.#", "#.#", "###", "..#", "..#"],
+        '5' => &["###", "#..", "##.", "..#", "##."],
+        '6' => &[".##", "#..", "###", "#.#", "###"],
+        '7' => &["###", "..#", ".#.", ".#.", ".#."],
+        '8' => &["###", "#.#", "###", "#.#", "###"],
+        '9' => &["###", "#.#", "###", "..#", "##."],
+        'A' => &[".#.", "#.#", "###", "#.#", "#.#"],
+        'B' => &["##.", "#.#", "##.", "#.#", "##."],
+        'C' => &[".##", "#..", "#..", "#..", ".##"],
+        'D' => &["##.", "#.#", "#.#", "#.#", "##."],
+        'E' => &["###", "#..", "##.", "#..", "###"],
+        'F' => &["###", "#..", "##.", "#..", "#.."],
+        'G' => &[".##", "#..", "#.#", "#.#", ".##"],
+        'H' => &["#.#", "#.#", "###", "#.#", "#.#"],
+        'J' => &["..#", "..#", "..#", "#.#", ".#."],
+        'K' => &["#.#", "#.#", "##.", "#.#", "#.#"],
+        'L' => &["#..", "#..", "#..", "#..", "###"],
+        'M' => &["#.#", "###", "###", "#.#", "#.#"],
+        'N' => &["#.#", "###", "###", "###", "#.#"],
+        'P' => &["##.", "#.#", "##.", "#..", "#.."],
+        'Q' => &[".#.", "#.#", "#.#", "###", ".##"],
+        'R' => &["##.", "#.#", "##.", "#.#", "#.#"],
+        'S' => &[".##", "#..", ".#.", "..#", "##."],
+        'T' => &["###", ".#.", ".#.", ".#.", ".#."],
+        'U' => &["#.#", "#.#", "#.#", "#.#", ".#."],
+        'V' => &["#.#", "#.#", "#.#", "#.#", ".#."],
+        'W' => &["#.#", "#.#", "###", "###", "#.#"],
+        'X' => &["#.#", "#.#", ".#.", "#.#", "#.#"],
+        'Y' => &["#.#", "#.#", ".#.", ".#.", ".#."],
+        'Z' => &["###", "..#", ".#.", "#..", "###"],
+        _ => return None,
+    })
+}
+
+fn draw_session_label<F: Framebuffer>(
+    fb: &mut F,
+    sim: &SimAnim,
+    cx: i32,
+    body_y: i32,
+    body_h: i32,
+) {
+    let Some(label) = sim.session_label.as_deref() else {
+        return;
+    };
+    let Some(ch) = label.chars().next() else {
+        return;
+    };
+    let Some(glyph) = label_glyph(ch) else {
+        return;
+    };
+    // Glyph envelope is 3x5; with the 1-px cardinal outline the painted
+    // footprint is 5x7. Center inside the 11x13 body so the outline never
+    // overruns it.
+    let glyph_w = 3;
+    let glyph_h = 5;
+    let gx = cx - glyph_w / 2;
+    let gy = body_y + (body_h - glyph_h) / 2;
+    let outline = Rgb(0, 0, 0);
+    let fill = Rgb(0xff, 0xff, 0xff);
+    // Outline pass: paint each fg cell at its four cardinal neighbours so
+    // every white pixel is bordered. Diagonals stay clear, which keeps the
+    // glyph crisp rather than blobby.
+    for (row, line) in glyph.iter().enumerate() {
+        for (col, c) in line.chars().enumerate() {
+            if c != '#' {
+                continue;
+            }
+            let px = gx + col as i32;
+            let py = gy + row as i32;
+            fb.set_pixel(px - 1, py, outline);
+            fb.set_pixel(px + 1, py, outline);
+            fb.set_pixel(px, py - 1, outline);
+            fb.set_pixel(px, py + 1, outline);
+        }
+    }
+    for (row, line) in glyph.iter().enumerate() {
+        for (col, c) in line.chars().enumerate() {
+            if c != '#' {
+                continue;
+            }
+            fb.set_pixel(gx + col as i32, gy + row as i32, fill);
+        }
+    }
 }
 
 fn scaled(v: i32) -> i32 {

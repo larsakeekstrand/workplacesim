@@ -87,6 +87,7 @@ fn seed_three_sims(store: &mut SimStore) {
             seated_since_ms: None,
             overflow_hash: hash_str("mid-walk-desk"),
             last_footstep_ms: 0,
+            session_label: None,
         },
     );
 
@@ -119,6 +120,7 @@ fn seed_three_sims(store: &mut SimStore) {
             seated_since_ms: None,
             overflow_hash: hash_str("mid-walk-meeting"),
             last_footstep_ms: 0,
+            session_label: None,
         },
     );
 
@@ -146,6 +148,7 @@ fn seed_three_sims(store: &mut SimStore) {
             seated_since_ms: Some(0),
             overflow_hash: hash_str("seated-lab"),
             last_footstep_ms: 0,
+            session_label: None,
         },
     );
 }
@@ -354,6 +357,7 @@ fn step6_whiteboard_matches_golden() {
             seated_since_ms: Some(0),
             overflow_hash: hash_str("sess"),
             last_footstep_ms: 0,
+            session_label: None,
         },
     );
     let agent = Agent {
@@ -433,6 +437,7 @@ fn step6_glyphs_matches_golden() {
                 seated_since_ms: seated_since,
                 overflow_hash: hash_str(id),
                 last_footstep_ms: 0,
+                session_label: None,
             },
         );
     };
@@ -574,6 +579,7 @@ fn step6_bench_matches_golden() {
             seated_since_ms: Some(0),
             overflow_hash: hash_str("lab"),
             last_footstep_ms: 0,
+            session_label: None,
         },
     );
     let now_ms = 1_000u64;
@@ -588,6 +594,101 @@ fn step6_bench_matches_golden() {
     scene::sim::draw_sims(&mut frame, &store);
     scene::text::draw_bench_flashes(&mut frame, &fx, now_ms, &fx_limits());
     compare_or_regen(GOLDEN_BENCH_PATH, frame.rgb_bytes());
+}
+
+// Session-label chest glyphs. Painted in `scene::sim::draw_sim` so this
+// golden also gates the per-session char position, contour, and pool order.
+const GOLDEN_SESSION_LABEL_PATH: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/golden/session-labels.raw"
+);
+
+#[test]
+fn session_labels_paint_on_chest() {
+    let mut store = SimStore::new();
+    let labs = lab_stations();
+    let ms = meeting_seats();
+    // Three sims, three distinct session_labels, three rooms — exercises
+    // the chest-text path against shirt/lab/meeting backgrounds.
+    let room_a = classify("coder", "", "default");
+    let seat_a = store.seats.allocate(room_a, "lbl-1");
+    store.anim.insert(
+        "lbl-1".into(),
+        SimAnim {
+            agent_id: "lbl-1".into(),
+            session_id: Some("sess-1".into()),
+            user: "alice".into(),
+            permission_mode: "default".into(),
+            is_lab: matches!(room_a, Room::Lab),
+            x: 360.0,
+            y: 384.0,
+            path: vec![],
+            seat: seat_a,
+            room: room_a,
+            state: SimState::Seated,
+            bob_phase: 0.0,
+            spawned_at_ms: 0,
+            seated_at_ms: Some(0),
+            seated_since_ms: Some(0),
+            overflow_hash: hash_str("lbl-1"),
+            last_footstep_ms: 0,
+            session_label: Some("1".into()),
+        },
+    );
+    let room_b = classify("verifier", "", "default");
+    let seat_b = store.seats.allocate(room_b, "lbl-7");
+    store.anim.insert(
+        "lbl-7".into(),
+        SimAnim {
+            agent_id: "lbl-7".into(),
+            session_id: Some("sess-2".into()),
+            user: "bob".into(),
+            permission_mode: "default".into(),
+            is_lab: true,
+            x: labs[0].seat_x as f32,
+            y: labs[0].seat_y as f32,
+            path: vec![],
+            seat: seat_b,
+            room: room_b,
+            state: SimState::Seated,
+            bob_phase: 0.0,
+            spawned_at_ms: 0,
+            seated_at_ms: Some(0),
+            seated_since_ms: Some(0),
+            overflow_hash: hash_str("lbl-7"),
+            last_footstep_ms: 0,
+            session_label: Some("7".into()),
+        },
+    );
+    let room_c = classify("planner", "", "plan");
+    let seat_c = store.seats.allocate(room_c, "lbl-A");
+    store.anim.insert(
+        "lbl-A".into(),
+        SimAnim {
+            agent_id: "lbl-A".into(),
+            session_id: Some("sess-3".into()),
+            user: "carol".into(),
+            permission_mode: "plan".into(),
+            is_lab: false,
+            x: ms[0].seat_x as f32,
+            y: ms[0].seat_y as f32,
+            path: vec![],
+            seat: seat_c,
+            room: room_c,
+            state: SimState::Seated,
+            bob_phase: 0.0,
+            spawned_at_ms: 0,
+            seated_at_ms: Some(0),
+            seated_since_ms: Some(0),
+            overflow_hash: hash_str("lbl-A"),
+            last_footstep_ms: 0,
+            session_label: Some("A".into()),
+        },
+    );
+    let mut frame = RenderFrame::new(RENDER_W, RENDER_H);
+    scene::draw_static_background(&mut frame, SPILL_ALPHA);
+    scene::sim::draw_sims(&mut frame, &store);
+    compare_or_regen(GOLDEN_SESSION_LABEL_PATH, frame.rgb_bytes());
 }
 
 // Status readout uses local-time via chrono; we test the logic rather than a

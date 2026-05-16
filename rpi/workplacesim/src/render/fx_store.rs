@@ -358,6 +358,7 @@ mod tests {
                 seated_since_ms: None,
                 overflow_hash: 0,
                 last_footstep_ms: 0,
+                session_label: None,
             },
         );
     }
@@ -587,6 +588,7 @@ mod tests {
                 seated_since_ms: Some(0),
                 overflow_hash: 0,
                 last_footstep_ms: 0,
+                session_label: None,
             },
         );
         let (tx, mut rx) = broadcast::channel(4);

@@ -11,7 +11,7 @@
 //! Time is injected: every method that needs "now" takes `now_ms: u64`.
 //! Tests pass deterministic values; production callers use `clock::now_ms()`.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 use indexmap::IndexMap;
@@ -38,6 +38,9 @@ const ERROR_PREVIEW_LEN: usize = 80;
 const PROMPT_PREVIEW_LEN: usize = 80;
 
 const VALID_ROOMS: &[&str] = &["test", "meeting", "desk"];
+
+// I and O dropped so "1/l" and "0/O" don't collide on a low-res TV.
+const SESSION_LABEL_POOL: &str = "123456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 
 /// Capacity for the broadcast channel. Subscribers that lag by more than this
 /// many messages see `RecvError::Lagged` and can resync via a snapshot event.
@@ -76,6 +79,14 @@ pub struct State {
     /// `events_per_min()` to compute an average over the last 60 s. Older
     /// entries are trimmed on every push; see `EVENT_HISTORY_MS`.
     recent_event_ts: VecDeque<u64>,
+
+    // session_id → assigned label char. Released when the last record from
+    // that session leaves `active_agents`.
+    session_labels: HashMap<String, char>,
+
+    // Free pool drained in order; tail is the next char handed out. None when
+    // exhausted, in which case fresh sessions render label-less.
+    label_free_pool: VecDeque<char>,
 }
 
 /// Construct a fresh State wrapped in Arc<RwLock>, plus a subscribed receiver
@@ -90,6 +101,8 @@ pub fn new_state(config: SharedConfig) -> (Arc<RwLock<State>>, broadcast::Receiv
         config,
         events_total: 0,
         recent_event_ts: VecDeque::new(),
+        session_labels: HashMap::new(),
+        label_free_pool: SESSION_LABEL_POOL.chars().collect(),
     };
     (Arc::new(RwLock::new(state)), rx)
 }
@@ -224,6 +237,8 @@ impl State {
             }
         };
 
+        let session_label = self.assign_session_label(p.session_id.as_deref());
+
         let record = Agent {
             agent_id: p.agent_id.clone(),
             session_id: p.session_id,
@@ -249,6 +264,7 @@ impl State {
             session_prompt: None,
             idle: None,
             current_error: None,
+            session_label,
         };
         self.active_agents.insert(p.agent_id, record.clone());
         self.emit(Event::Start {
@@ -506,6 +522,33 @@ impl State {
         }
     }
 
+    // Look up or hand out a label for `session_id`. Pool exhaustion is a soft
+    // failure — callers store None and the renderer skips painting.
+    fn assign_session_label(&mut self, session_id: Option<&str>) -> Option<String> {
+        let sid = session_id?;
+        if let Some(c) = self.session_labels.get(sid) {
+            return Some(c.to_string());
+        }
+        let c = self.label_free_pool.pop_front()?;
+        self.session_labels.insert(sid.to_string(), c);
+        Some(c.to_string())
+    }
+
+    // Return `session_id`'s char to the pool iff no other active record still
+    // references it. Called after a stop is finalised in `tick`.
+    fn release_session_label_if_unused(&mut self, session_id: &str) {
+        if self
+            .active_agents
+            .values()
+            .any(|a| a.session_id.as_deref() == Some(session_id))
+        {
+            return;
+        }
+        if let Some(c) = self.session_labels.remove(session_id) {
+            self.label_free_pool.push_back(c);
+        }
+    }
+
     /// Drive time-based state transitions. The render loop will call this
     /// every frame; tests call it explicitly with a chosen `now_ms`.
     ///
@@ -554,7 +597,13 @@ impl State {
             .collect();
         for id in finalised {
             self.pending_stops.shift_remove(&id);
-            self.active_agents.shift_remove(&id);
+            let removed_sid = self
+                .active_agents
+                .shift_remove(&id)
+                .and_then(|a| a.session_id);
+            if let Some(sid) = removed_sid {
+                self.release_session_label_if_unused(&sid);
+            }
         }
     }
 }
@@ -584,6 +633,8 @@ mod tests {
             config: config::shared(Config::default()),
             events_total: 0,
             recent_event_ts: VecDeque::new(),
+            session_labels: HashMap::new(),
+            label_free_pool: SESSION_LABEL_POOL.chars().collect(),
         };
         (state, rx)
     }
@@ -1242,6 +1293,64 @@ mod tests {
         assert_eq!(s.pending_descriptions.len(), 1);
         s.tick(PENDING_TTL_MS + 1);
         assert!(s.pending_descriptions.is_empty());
+    }
+
+    #[test]
+    fn session_label_assigned_in_pool_order_and_reused_per_session() {
+        let (mut s, _rx) = setup();
+        let a = s
+            .start_agent(start("a1", Some("sess-1"), Some("claude")), 0)
+            .unwrap();
+        let b = s
+            .start_agent(start("a2", Some("sess-1"), Some("verifier")), 0)
+            .unwrap();
+        let c = s
+            .start_agent(start("a3", Some("sess-2"), Some("claude")), 0)
+            .unwrap();
+        assert_eq!(a.session_label.as_deref(), Some("1"));
+        assert_eq!(b.session_label.as_deref(), Some("1"));
+        assert_eq!(c.session_label.as_deref(), Some("2"));
+    }
+
+    #[test]
+    fn session_label_none_when_no_session_id() {
+        let (mut s, _rx) = setup();
+        let a = s.start_agent(start("a1", None, Some("coder")), 0).unwrap();
+        assert!(a.session_label.is_none());
+    }
+
+    #[test]
+    fn session_label_released_only_when_last_record_finalised() {
+        let (mut s, mut rx) = setup();
+        s.start_agent(start("a1", Some("sess"), Some("claude")), 0);
+        s.start_agent(start("a2", Some("sess"), Some("verifier")), 0);
+        let _ = drain(&mut rx);
+        // First stop + finalise: still another record on the session, no release.
+        s.stop_agent(
+            StopAgent {
+                agent_id: Some("a1".into()),
+                ..Default::default()
+            },
+            0,
+        );
+        s.tick(STOP_GRACE_MS + 1);
+        let next = s
+            .start_agent(start("a3", Some("other"), Some("claude")), 100)
+            .unwrap();
+        assert_eq!(next.session_label.as_deref(), Some("2"));
+        // Finalise the last record on "sess" — "1" returns to the pool tail.
+        // Fresh sessions still drain the head ("3") first; only once the head
+        // chars have been used does "1" come back round.
+        s.stop_agent(
+            StopAgent {
+                agent_id: Some("a2".into()),
+                ..Default::default()
+            },
+            100,
+        );
+        s.tick(100 + STOP_GRACE_MS + 1);
+        assert!(!s.session_labels.contains_key("sess"));
+        assert!(s.label_free_pool.contains(&'1'));
     }
 
     #[test]

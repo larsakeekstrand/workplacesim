@@ -10,6 +10,32 @@ const pendingDescriptions = new Map();
 const visitTimers = new Map();
 const subscribers = new Set();
 
+// Per-session chest label. Skip I/O for legibility; first-come, first-served.
+const LABEL_POOL = "123456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+const sessionLabels = new Map();
+
+function acquireLabel(sessionId) {
+  if (!sessionId) return null;
+  const existing = sessionLabels.get(sessionId);
+  if (existing) return existing;
+  const taken = new Set(sessionLabels.values());
+  for (const ch of LABEL_POOL) {
+    if (!taken.has(ch)) {
+      sessionLabels.set(sessionId, ch);
+      return ch;
+    }
+  }
+  return null;
+}
+
+function releaseLabelIfUnused(sessionId) {
+  if (!sessionId) return;
+  for (const r of activeAgents.values()) {
+    if (r.session_id === sessionId) return;
+  }
+  sessionLabels.delete(sessionId);
+}
+
 const pendingKey = (sessionId, subagentType) => `${sessionId ?? ""}::${subagentType ?? ""}`;
 
 function broadcast(message) {
@@ -71,6 +97,7 @@ export function startAgent(raw) {
 
   const description =
     rawDescription || consumeDescription(session_id, agent_type) || agent_type || "agent";
+  const sessionLabel = acquireLabel(session_id);
   const record = {
     agent_id,
     session_id: session_id ?? null,
@@ -82,6 +109,7 @@ export function startAgent(raw) {
     permission_mode: permission_mode || "default",
     started_at: Date.now(),
   };
+  if (sessionLabel) record.session_label = sessionLabel;
   activeAgents.set(agent_id, record);
   broadcast({ type: "start", agent: record });
   return record;
@@ -114,7 +142,11 @@ export function stopAgent(raw) {
   }
   broadcast({ type: "stop", agent_id: record.agent_id });
   const targetId = record.agent_id;
-  setTimeout(() => activeAgents.delete(targetId), STOP_GRACE_MS);
+  const targetSession = record.session_id;
+  setTimeout(() => {
+    activeAgents.delete(targetId);
+    releaseLabelIfUnused(targetSession);
+  }, STOP_GRACE_MS);
   return record;
 }
 

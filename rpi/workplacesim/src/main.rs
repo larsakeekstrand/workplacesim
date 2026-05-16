@@ -49,10 +49,13 @@ fn seed_demo_agents(state: &workplacesim::server::Shared, n: usize) {
         ("eve", "reviewer", "default", "lint the state module"),
         ("frank", "coder", "plan", "sketch the fb backend"),
     ];
+    // Alternate two session_ids so the chest labels demo the per-session
+    // assignment contract (same char across sims that share a session,
+    // distinct char across concurrent sessions).
     for i in 0..n {
         let (user, ty, mode, desc) = profiles[i % profiles.len()];
         let id = format!("demo-{i}");
-        let sid = format!("demo-session-{i}");
+        let sid = format!("demo-session-{}", i % 2);
         let started_at = now + (i as u64) * 2_000;
         let mut s = state.write();
         s.start_agent(

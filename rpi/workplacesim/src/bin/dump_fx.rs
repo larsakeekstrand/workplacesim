@@ -50,6 +50,7 @@ fn seed_sim(
         },
         overflow_hash,
         last_footstep_ms: 0,
+        session_label: None,
     };
     store.anim.insert(id.into(), sim);
 }

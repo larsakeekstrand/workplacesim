@@ -22,6 +22,7 @@ pub struct AgentView {
     pub permission_mode: String,
     pub started_at: u64,
     pub finished_at: Option<u64>,
+    pub session_label: Option<String>,
 }
 
 impl From<&Agent> for AgentView {
@@ -35,6 +36,7 @@ impl From<&Agent> for AgentView {
             permission_mode: a.permission_mode.clone(),
             started_at: a.started_at,
             finished_at: a.finished_at,
+            session_label: a.session_label.clone(),
         }
     }
 }

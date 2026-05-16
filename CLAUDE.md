@@ -163,6 +163,15 @@ makes mid-session plan-mode toggles visible.
   magenta `#ff8fd4`, Web* purple `#c28fff`, default `#cccccc`. Capped at
   `MOTE_CAP = 40` live motes, drop-oldest.
 
+- **Chest label** — single char from `LABEL_POOL = "123456789ABCDEFGHJKLMNPQRSTUVWXYZ"`
+  (`I` and `O` skipped for legibility) painted on each sim's body. Server
+  assigns one per `session_id` in `startAgent`/`start_agent`, releases when
+  the last `activeAgents` record for that session is removed after
+  `STOP_GRACE_MS`. The main session sim and every subagent under it share
+  the same char, so multiple concurrent Claude instances are visually
+  distinguishable. Carried on the agent record as `session_label` and
+  flows through the existing `start`/`snapshot` payloads.
+
 - **Labels** sit south of the sim, fade to 0.35 alpha once seated, restore
   to 1.0 on hover. The file-touch ticker is a single `Text` along the
   open-plan north wall.

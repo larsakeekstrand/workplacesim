@@ -1015,6 +1015,22 @@ class RoomScene extends Phaser.Scene {
       container.badge = badge;
     }
 
+    if (opts.label) {
+      // Black outline so the char reads against any shirt color.
+      const label = this.add
+        .text(0, 3, opts.label, {
+          fontFamily: "system-ui, sans-serif",
+          fontSize: "8px",
+          color: "#ffffff",
+          stroke: "#000000",
+          strokeThickness: 2,
+          resolution: 2,
+        })
+        .setOrigin(0.5, 0.5);
+      container.add(label);
+      container.label = label;
+    }
+
     container.setSize(14, 28);
     container.shadow = shadow;
     container.legs = legs;
@@ -1370,7 +1386,10 @@ class RoomScene extends Phaser.Scene {
     const target = this.pickTarget(agent);
 
     const badge = kind === "plan" ? "📋" : kind === "test" ? "🧪" : null;
-    const sprite = this.makeSim(agent.user || "unknown", { badge });
+    const sprite = this.makeSim(agent.user || "unknown", {
+      badge,
+      label: agent.session_label || null,
+    });
     sprite.setScale(1.8);
 
     const restingPos = this.targetRestingPosition(target);

@@ -52,6 +52,7 @@ fn seed(
             seated_since_ms: seated_since,
             overflow_hash: overflow,
             last_footstep_ms: 0,
+            session_label: None,
         },
     );
     let mut a = Agent {

@@ -287,6 +287,7 @@ mod tests {
             seated_since_ms: Some(0),
             overflow_hash: 0,
             last_footstep_ms: 0,
+            session_label: None,
         }
     }
 

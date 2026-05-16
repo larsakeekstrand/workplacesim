@@ -19,6 +19,7 @@ fn seed_sim(
     state: SimState,
     pos: Point,
     path: Vec<Point>,
+    label: Option<&str>,
 ) {
     let room = classify(ty, "", mode);
     let overflow_hash = workplacesim::render::palette::hash_str(id);
@@ -49,6 +50,7 @@ fn seed_sim(
         },
         overflow_hash,
         last_footstep_ms: 0,
+        session_label: label.map(|s| s.to_string()),
     };
     store.anim.insert(id.into(), sim);
 }
@@ -66,6 +68,7 @@ fn main() -> anyhow::Result<()> {
         SimState::WalkingIn,
         Point::new(300, 256),
         vec![Point::new(520, 256), Point::new(520, 224)],
+        Some("1"),
     );
 
     // Sim 2: mid-walk toward the meeting room.
@@ -84,6 +87,7 @@ fn main() -> anyhow::Result<()> {
             Point::new(944, 127),
             Point::new(944, 155),
         ],
+        Some("2"),
     );
 
     // Sim 3: seated in the lab.
@@ -98,6 +102,7 @@ fn main() -> anyhow::Result<()> {
         SimState::Seated,
         Point::new(seated.seat_x, seated.seat_y),
         vec![],
+        Some("A"),
     );
 
     let mut frame = RenderFrame::new(RENDER_W, RENDER_H);

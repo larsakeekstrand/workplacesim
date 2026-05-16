@@ -143,6 +143,9 @@ pub struct SimAnim {
     /// Last frame ms at which a footstep was dropped for this sim. Owned here
     /// so FxStore stays a pure ring-buffer with no per-sim shadow state.
     pub last_footstep_ms: u64,
+    // Mirror of `Agent::session_label`. Cloned at spawn; sessions don't
+    // re-label, so we never need to re-read this after reconcile.
+    pub session_label: Option<String>,
 }
 
 impl SimAnim {
@@ -210,6 +213,7 @@ impl SimStore {
                 seated_since_ms: None,
                 overflow_hash,
                 last_footstep_ms: 0,
+                session_label: a.session_label.clone(),
             };
             self.anim.insert(a.agent_id.clone(), sim);
         }
@@ -368,6 +372,7 @@ mod tests {
             permission_mode: mode.into(),
             started_at,
             finished_at,
+            session_label: None,
         }
     }
 
@@ -428,6 +433,7 @@ mod tests {
             seated_since_ms: None,
             overflow_hash: 0,
             last_footstep_ms: 0,
+            session_label: None,
         };
         sim.path.reserve(0);
         store.anim.insert("t".into(), sim);
@@ -476,6 +482,7 @@ mod tests {
             seated_since_ms: None,
             overflow_hash: 0,
             last_footstep_ms: 0,
+            session_label: None,
         };
         store.anim.insert("t".into(), sim);
         // 10 px at 55 px/s => ~182 ms. Tick 500 ms to be safe.
@@ -561,6 +568,7 @@ mod tests {
             seated_since_ms: Some(0),
             overflow_hash: 0,
             last_footstep_ms: 0,
+            session_label: None,
         };
         store.anim.insert("t".into(), sim);
         store.tick(900, 900, WALK_SPEED_PX_PER_SEC, BOB_CYCLE_MS);
