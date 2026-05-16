@@ -1,0 +1,37 @@
+#!/sbin/openrc-run
+# OpenRC init script for workplacesim.
+#
+# Runs the renderer as root so it can open /dev/fb0 and the VT ioctls on
+# /dev/tty1. Uses OpenRC's supervise-daemon to get the systemd Restart=always
+# equivalent: the supervisor keeps the process attached and respawns it on
+# exit with a 2 s backoff.
+#
+# Logs are plain files in /var/log (no syslog dep). Rotate with logrotate or
+# `truncate` if they get large; this is a single-purpose appliance so we
+# don't bother with rotation out of the box.
+
+name="workplacesim"
+description="workplacesim office display"
+
+command="/usr/local/bin/workplacesim"
+command_args=""
+command_background=false
+
+supervisor="supervise-daemon"
+pidfile="/run/workplacesim.pid"
+respawn_delay=2
+
+output_log="/var/log/workplacesim.log"
+error_log="/var/log/workplacesim.err"
+
+# HOSTNAME is picked up by the binary's mDNS registration so the Pi
+# advertises itself under its real hostname without needing avahi.
+export HOST="0.0.0.0"
+export PORT="4317"
+export RUST_LOG="info"
+export HOSTNAME="$(hostname)"
+
+depend() {
+    need net localmount
+    after bootmisc
+}

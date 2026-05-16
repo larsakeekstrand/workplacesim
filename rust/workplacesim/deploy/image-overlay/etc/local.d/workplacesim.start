@@ -1,0 +1,20 @@
+#!/bin/sh
+# Belt-and-suspenders first-boot hook.
+#
+# The apkovl built by mkimage.sh already drops
+# /etc/runlevels/default/workplacesim -> /etc/init.d/workplacesim, so
+# OpenRC starts the service as part of bringing up the `default` runlevel
+# (which `/etc/inittab` triggers with `::wait:/sbin/openrc default`). This
+# script is a safety net in case a particular Alpine boot ordering starts
+# `local` before our service, or never reaches our service for any
+# reason — it idempotently starts the service and removes itself.
+#
+# Executed by OpenRC's `local` service (which iterates /etc/local.d/*.start
+# at the `default` runlevel). mkimage.sh stages this at 0755 in the apkovl
+# so tar preserves the executable bit.
+set -eu
+
+# No `rc-update add` needed — the apkovl created the runlevel symlink.
+rc-service workplacesim status >/dev/null 2>&1 || rc-service workplacesim start
+
+rm -f /etc/local.d/workplacesim.start
