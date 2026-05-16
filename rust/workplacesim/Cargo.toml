@@ -33,7 +33,11 @@ image = { version = "0.25", default-features = false, features = ["png"], option
 [target.'cfg(target_os = "linux")'.dependencies]
 memmap2 = "0.9"
 libc = "0.2"
-nix = { version = "0.29", default-features = false, features = ["fs", "ioctl", "mman", "signal"] }
+nix = { version = "0.29", default-features = false, features = ["fs", "hostname", "ioctl", "mman", "signal"] }
+# In-process mDNS responder so the Pi deploy can drop avahi-daemon entirely.
+# Linux-only gate: on macOS dev we rely on the host's own mDNSResponder, so
+# bundling ours would fight it; `server/mdns.rs` provides a no-op stub there.
+mdns-sd = { version = "0.11", default-features = false }
 
 [features]
 # No renderer by default: `cargo build` produces a server-only binary that

@@ -20,6 +20,7 @@ use crate::config::{persist::ConfigSource, SharedConfig};
 use crate::state::State;
 
 pub mod error;
+pub mod mdns;
 pub mod routes;
 pub mod sse;
 pub mod static_files;
@@ -180,12 +181,18 @@ pub fn build_router(app: AppState) -> Router {
 }
 
 /// Bind to `addr` and serve until the future returned by `shutdown` resolves.
+/// Also registers mDNS for the bound port (best-effort; see `mdns` module).
 pub async fn run(
     addr: SocketAddr,
     app: AppState,
+    hostname: &str,
     shutdown: impl std::future::Future<Output = ()> + Send + 'static,
 ) -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
+    let bound = listener.local_addr().unwrap_or(addr);
+    // Guard stays alive for the serve() lifetime; dropped on return so
+    // unregister runs before the process exits cleanly via systemd.
+    let _mdns = mdns::register(bound, hostname);
     let router = build_router(app);
     axum::serve(listener, router)
         .with_graceful_shutdown(shutdown)

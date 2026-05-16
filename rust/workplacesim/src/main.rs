@@ -140,6 +140,32 @@ fn bind_addr() -> SocketAddr {
     SocketAddr::new(host, port)
 }
 
+/// Resolve the hostname used for mDNS service instance names. Matches what
+/// `avahi-daemon`'s `%h` expansion would have picked on the Pi: HOSTNAME env
+/// var wins if set (handy for container / systemd overrides), then the kernel
+/// hostname via nix, then a sane literal fallback.
+#[cfg_attr(all(feature = "fb", not(target_os = "linux")), allow(dead_code))]
+fn resolve_hostname() -> String {
+    if let Ok(s) = std::env::var("HOSTNAME") {
+        let trimmed = s.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(os) = nix::unistd::gethostname() {
+            if let Ok(s) = os.into_string() {
+                let trimmed = s.trim();
+                if !trimmed.is_empty() {
+                    return trimmed.to_string();
+                }
+            }
+        }
+    }
+    "workplacesim".to_string()
+}
+
 /// Resolves on SIGINT (Ctrl+C) or SIGTERM (systemd stop). On non-unix,
 /// falls through to just Ctrl+C. Only compiled into the server-only branch;
 /// desktop and fb branches run synchronously and handle signals locally.
@@ -173,7 +199,11 @@ async fn shutdown_signal() {
 /// paths. The process exits on window close / SIGINT; cancellation of the
 /// server is acceptable-abrupt for MVP.
 #[cfg(any(feature = "desktop", all(feature = "fb", target_os = "linux")))]
-fn spawn_server(addr: SocketAddr, app: AppState) -> std::thread::JoinHandle<anyhow::Result<()>> {
+fn spawn_server(
+    addr: SocketAddr,
+    app: AppState,
+    hostname: String,
+) -> std::thread::JoinHandle<anyhow::Result<()>> {
     std::thread::spawn(move || -> anyhow::Result<()> {
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -186,7 +216,7 @@ fn spawn_server(addr: SocketAddr, app: AppState) -> std::thread::JoinHandle<anyh
             let shutdown = async {
                 let _ = tokio::signal::ctrl_c().await;
             };
-            workplacesim::server::run(addr, app, shutdown).await
+            workplacesim::server::run(addr, app, &hostname, shutdown).await
         })
     })
 }
@@ -217,7 +247,7 @@ fn main() -> anyhow::Result<()> {
     // minifb on macOS requires the main thread for the window (AppKit
     // constraint). Spawn the axum server on a background tokio runtime and
     // run the window loop on the main thread.
-    let _server_thread = spawn_server(addr, app);
+    let _server_thread = spawn_server(addr, app, resolve_hostname());
 
     workplacesim::render::desktop::run_desktop_with_fb_info(
         state,
@@ -246,7 +276,7 @@ fn main() -> anyhow::Result<()> {
         config_source,
     );
     let fb_info_handle = app.fb_info.clone();
-    let _server_thread = spawn_server(addr, app);
+    let _server_thread = spawn_server(addr, app, resolve_hostname());
 
     // Renderer runs on the main thread so signal delivery and VtGuard drop
     // order are predictable. `run_fb` installs its own SIGINT/SIGTERM handler
@@ -281,7 +311,8 @@ async fn main() -> anyhow::Result<()> {
     // Each SSE client spawns its own receiver via `State::subscribe_events()`.
 
     let app = build_app_state(state, shared_config, config_path, config_source);
+    let hostname = resolve_hostname();
 
     tracing::info!("workplacesim listening on http://{addr}");
-    workplacesim::server::run(addr, app, shutdown_signal()).await
+    workplacesim::server::run(addr, app, &hostname, shutdown_signal()).await
 }

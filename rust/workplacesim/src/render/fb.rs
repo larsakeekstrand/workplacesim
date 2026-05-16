@@ -313,7 +313,7 @@ mod linux_impl {
                         // SAFETY: fd is owned by `f` which outlives this call,
                         // KDSETMODE takes an integer arg, and KD_GRAPHICS is a
                         // valid mode.
-                        let rc = unsafe { libc::ioctl(fd, KDSETMODE, KD_GRAPHICS) };
+                        let rc = unsafe { libc::ioctl(fd, KDSETMODE as _, KD_GRAPHICS) };
                         if rc < 0 {
                             last_err = Some(std::io::Error::last_os_error());
                             continue;
@@ -336,7 +336,7 @@ mod linux_impl {
         fn drop(&mut self) {
             // SAFETY: fd is still owned by the guarded File; ioctl arg is a
             // valid mode constant.
-            unsafe { libc::ioctl(self.fd, KDSETMODE, KD_TEXT) };
+            unsafe { libc::ioctl(self.fd, KDSETMODE as _, KD_TEXT) };
         }
     }
 
@@ -367,14 +367,14 @@ mod linux_impl {
             // same repr as the kernel ABI.
             let mut vinfo: FbVarScreeninfo = FbVarScreeninfo::default();
             let mut finfo: FbFixScreeninfo = FbFixScreeninfo::default();
-            let rc_v = unsafe { libc::ioctl(fd, FBIOGET_VSCREENINFO, &mut vinfo as *mut _) };
+            let rc_v = unsafe { libc::ioctl(fd, FBIOGET_VSCREENINFO as _, &mut vinfo as *mut _) };
             if rc_v < 0 {
                 return Err(anyhow::anyhow!(
                     "FBIOGET_VSCREENINFO: {}",
                     std::io::Error::last_os_error()
                 ));
             }
-            let rc_f = unsafe { libc::ioctl(fd, FBIOGET_FSCREENINFO, &mut finfo as *mut _) };
+            let rc_f = unsafe { libc::ioctl(fd, FBIOGET_FSCREENINFO as _, &mut finfo as *mut _) };
             if rc_f < 0 {
                 return Err(anyhow::anyhow!(
                     "FBIOGET_FSCREENINFO: {}",
