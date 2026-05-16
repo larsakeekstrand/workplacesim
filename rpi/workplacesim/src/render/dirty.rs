@@ -7,7 +7,7 @@
 //! a conservative AABB just rasterises some extra background per frame.
 
 use super::fx_store::FxStore;
-use super::geometry::Rect;
+use super::geometry::{Rect, MEETING_ROOM};
 use super::scene::h;
 use super::sim_store::{SimAnim, SimStore};
 use super::{RENDER_H, RENDER_W};
@@ -130,6 +130,18 @@ pub fn collect_dynamics(sim_store: &SimStore, fx: &FxStore) -> Vec<Rect> {
 
     out.retain(|r| r.w > 0 && r.h > 0);
     out
+}
+
+/// Render-frame AABB of the whiteboard panel — mirrors the coords used by
+/// `scene::furniture::draw_meeting_room` and `scene::text::draw_whiteboard`.
+/// The dirty tracker can't see the text overlay (it lives off a separate
+/// `agents` slice), so the fb backend opts it in explicitly.
+pub fn whiteboard_rect() -> Rect {
+    let wb_w = h(200);
+    let wb_h = h(22).max(6);
+    let wb_x = h(MEETING_ROOM.x) + (h(MEETING_ROOM.w) - wb_w) / 2;
+    let wb_y = h(MEETING_ROOM.y) + h(10);
+    clip(Rect::new(wb_x - 1, wb_y - 1, wb_w + 2, wb_h + 2))
 }
 
 fn sim_aabb(sim: &SimAnim) -> Option<Rect> {
@@ -433,6 +445,23 @@ mod tests {
         let fx = FxStore::new();
         let d = compute_frame_dirties(&sim_store, &fx, &[]);
         assert!(d.is_empty());
+    }
+
+    #[test]
+    fn whiteboard_rect_covers_meeting_panel() {
+        // The fb backend pushes this rect every frame so prompt updates land
+        // on the panel. Verify it sits within MEETING_ROOM and has non-zero
+        // area; coords mirror scene::furniture::draw_meeting_room.
+        let r = whiteboard_rect();
+        assert!(r.w > 0 && r.h > 0);
+        let mx = h(MEETING_ROOM.x);
+        let mw = h(MEETING_ROOM.w);
+        let my = h(MEETING_ROOM.y);
+        let mh = h(MEETING_ROOM.h);
+        assert!(r.x >= mx - 1);
+        assert!(r.y >= my - 1);
+        assert!(r.x + r.w <= mx + mw + 1);
+        assert!(r.y + r.h <= my + mh + 1);
     }
 
     #[test]

@@ -67,8 +67,10 @@ fn draw_sim<F: Framebuffer>(fb: &mut F, sim: &SimAnim) {
     );
 
     // Legs — two small rects side-by-side. Walking swings them; seated is flat.
+    // Top below cy by ~scaled(4) so ~3 render-px of leg sticks out below the
+    // body bottom (visible legs read at ~13% of sim height, matching Node).
     let (left_leg_h, right_leg_h) = leg_lengths(sim, leg_h);
-    let legs_top_y = cy + scaled(3);
+    let legs_top_y = cy + scaled(4);
     fb.fill_rect(
         Rect::new(
             cx - leg_w - leg_gap / 2 - leg_w + 1,

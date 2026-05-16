@@ -208,7 +208,7 @@ mod linux_impl {
     use tokio::sync::broadcast;
 
     use crate::config::SharedConfig;
-    use crate::render::dirty::DirtyTracker;
+    use crate::render::dirty::{whiteboard_rect, DirtyTracker};
     use crate::render::fx_store::{FxLimits, FxStore};
     use crate::render::sim_store::SimStore;
     use crate::render::world::RenderWorld;
@@ -651,7 +651,10 @@ mod linux_impl {
                 let _ = tracker.step(&store, &fx);
                 first_frame = false;
             } else {
-                let dirties = tracker.step(&store, &fx);
+                let mut dirties = tracker.step(&store, &fx);
+                // Whiteboard text lives off the agents slice the tracker
+                // can't see; opt the panel in so prompt updates land on fb.
+                dirties.push(whiteboard_rect());
                 for r in &dirties {
                     fb.blit_rect(&frame, *r);
                 }
