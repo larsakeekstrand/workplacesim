@@ -39,11 +39,13 @@ One slash command:
 Two environment variables, both optional:
 
 - `WORKPLACESIM_URL` — base URL for the visualizer server. Defaults to
-  `http://127.0.0.1:4317`. Point it at a LAN address to send events to a
-  visualizer running on another machine. For the Raspberry Pi deploy the
-  canonical URL is `http://workplacesim.local:4317` — `rpi/workplacesim/
-  deploy/install.sh` sets up the hostname and mDNS advertisement so that
-  just works; see `rpi/workplacesim/deploy/README.md` for the flow.
+  `http://workplacesim.local:4317`, which resolves to the Raspberry Pi
+  running the Rust visualizer via the in-binary mDNS responder set up by
+  `rpi/workplacesim/deploy/install.sh`. Override with
+  `export WORKPLACESIM_URL=http://127.0.0.1:4317` to point at a local
+  Node server, or any other LAN address. The hook script silently drops
+  events when the URL is unreachable so a missing visualizer never blocks
+  a Claude session.
 - The hook script also reads `$USER` and `$(hostname -s)` to label your sim.
 
 ## Dependencies

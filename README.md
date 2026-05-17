@@ -26,8 +26,30 @@ to accept hook posts from other machines on the LAN).
 
 ## Install as a Claude Code plugin
 
-The hook side ships as a Claude Code plugin in `plugin/`. Install it from this
-repo as a one-plugin marketplace:
+The hook side ships as a Claude Code plugin. Install it straight from GitHub:
+
+```
+/plugin marketplace add larsakeekstrand/workplacesim
+/plugin install workplacesim
+```
+
+Pin a branch or tag with `larsakeekstrand/workplacesim@main`. Refresh with
+`/plugin marketplace update`.
+
+For a team setup, drop this in `.claude/settings.json` to pre-register the
+marketplace so teammates only need `/plugin install workplacesim@workplacesim`:
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "workplacesim": {
+      "source": { "source": "github", "repo": "larsakeekstrand/workplacesim" }
+    }
+  }
+}
+```
+
+When working on the plugin itself, install from your local checkout instead:
 
 ```
 /plugin marketplace add /absolute/path/to/workplacesim
@@ -39,8 +61,14 @@ subscriptions across eight Claude Code events; `/reload-plugins` is not
 enough to activate new event subscriptions. After restart, `/workplacesim`
 checks the visualizer's status.
 
-To point the plugin at a visualizer running on another host, set
-`WORKPLACESIM_URL=http://<host>:4317` in the environment Claude Code runs in.
+By default the plugin POSTs to `http://workplacesim.local:4317` — the Pi
+running the Rust visualizer, reachable via the in-binary mDNS responder.
+To point it elsewhere (e.g. a local Node server), set `WORKPLACESIM_URL`
+in the environment Claude Code runs in:
+
+```sh
+export WORKPLACESIM_URL=http://127.0.0.1:4317   # local Node server
+```
 
 See `plugin/README.md` for plugin-specific details.
 

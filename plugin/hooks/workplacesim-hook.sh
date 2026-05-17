@@ -24,7 +24,7 @@
 
 set -u
 
-URL="${WORKPLACESIM_URL:-http://127.0.0.1:4317}"
+URL="${WORKPLACESIM_URL:-http://workplacesim.local:4317}"
 sub="${1:-}"
 
 if ! command -v jq >/dev/null 2>&1; then
