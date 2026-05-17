@@ -1,10 +1,12 @@
 //! Static scene drawing. Ports `drawFloor` / `drawWalls` / `drawWindows` /
 //! `drawDesk` / `drawMeetingRoom` / `drawLabRoom` from `public/main.js`.
 //!
-//! Coordinate convention: the JS world is 1280x640, but the render frame is
-//! 640x360 — every incoming JS coordinate is halved at draw time (`h()` /
-//! `Rect::half()`). Layout constants stay in their JS-native values so the
-//! geometry port stays byte-for-byte comparable with `public/main.js`.
+//! Coordinate convention: JS world coords (1280x640) land 1:1 in the
+//! 1280x720 render frame — `h()` is identity, kept as a callsite for symmetry
+//! and to leave the call graph stable if we ever rescale again. The world's
+//! 80 px of vertical headroom (720 - 640) sits unused at the bottom of the
+//! render canvas; the fb/desktop backends upscale aspect-preserving so that
+//! headroom becomes letterboxing.
 
 pub mod effects;
 pub mod furniture;
@@ -49,12 +51,11 @@ pub fn draw_static_background(fb: &mut RenderFrame, window_spill_alpha: f32) {
     furniture::draw_lab_room(fb);
 }
 
-/// Halve a JS world coordinate to the render-frame coordinate.
+/// Map a JS world coordinate to the render-frame coordinate. Identity since
+/// RENDER_W == WORLD_W; preserved as a callsite for symmetry.
 #[inline]
 pub(crate) fn h(v: i32) -> i32 {
-    // Integer divide mirrors Phaser rasterisation for even inputs and rounds
-    // toward zero for odd — good enough since our layout is grid-aligned.
-    v / 2
+    v
 }
 
 #[inline]

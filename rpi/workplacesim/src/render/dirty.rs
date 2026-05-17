@@ -330,35 +330,33 @@ mod tests {
         let fx = FxStore::new();
         let d = compute_frame_dirties(&sim_store, &fx, &[]);
         assert_eq!(d.len(), 1);
-        // (200,200) JS world → (100,100) render. AABB must contain (100,100).
+        // World coords land 1:1 in render space (h() is identity). AABB
+        // must contain (200,200).
         let r = d[0];
         assert!(
-            r.contains(Point::new(100, 100)),
-            "rect {:?} should contain (100,100)",
+            r.contains(Point::new(200, 200)),
+            "rect {:?} should contain (200,200)",
             r
         );
     }
 
     #[test]
     fn compute_frame_dirties_covers_sim_positions_and_last_frame() {
-        // Simulate a walk: sim was at (100,100) last frame (last_dirty),
-        // now at (200,100). Dirty set must cover both old and new render
-        // positions so the old pixels get erased.
+        // Simulate a walk: sim was at (200,200) last frame (last_dirty),
+        // now at (400,200). Dirty set must cover both old and new positions
+        // so the old pixels get erased.
         let mut sim_store = SimStore::new();
-        sim_store.anim.insert("a".into(), mk_sim("a", 200.0, 100.0));
+        sim_store.anim.insert("a".into(), mk_sim("a", 400.0, 200.0));
         let fx = FxStore::new();
-        // Last frame's AABB — conservative rect at (old_x/2, old_y/2).
-        let last = vec![Rect::new(40, 40, 20, 20)];
+        // Last frame's AABB — conservative rect at old position.
+        let last = vec![Rect::new(190, 190, 20, 20)];
         let d = compute_frame_dirties(&sim_store, &fx, &last);
-        // The last rect is far enough from the new sim position that they
-        // shouldn't merge: two distinct rects expected.
         assert!(!d.is_empty(), "at least one rect");
         // Either merged (one rect covers both) or separate (both present).
-        let covers_old = d.iter().any(|r| r.contains(Point::new(50, 50)));
-        // new sim at (100, 50) render coords
-        let covers_new = d.iter().any(|r| r.contains(Point::new(100, 50)));
-        assert!(covers_old, "must cover old AABB at (50,50)");
-        assert!(covers_new, "must cover new sim at (100,50)");
+        let covers_old = d.iter().any(|r| r.contains(Point::new(200, 200)));
+        let covers_new = d.iter().any(|r| r.contains(Point::new(400, 200)));
+        assert!(covers_old, "must cover old AABB at (200,200)");
+        assert!(covers_new, "must cover new sim at (400,200)");
     }
 
     #[test]
@@ -374,8 +372,8 @@ mod tests {
         });
         let d = compute_frame_dirties(&sim_store, &fx, &[]);
         assert_eq!(d.len(), 1);
-        // (400,300) JS → (200,150) render.
-        assert!(d[0].contains(Point::new(200, 150)));
+        // World coords land 1:1 in render space.
+        assert!(d[0].contains(Point::new(400, 300)));
     }
 
     #[test]
@@ -392,7 +390,7 @@ mod tests {
         let d = compute_frame_dirties(&sim_store, &fx, &[]);
         assert_eq!(d.len(), 1);
         // Mote AABB includes the upward drift band: y from (render_y - MOTE_UP - pad).
-        assert!(d[0].contains(Point::new(200, 150)));
+        assert!(d[0].contains(Point::new(400, 300)));
     }
 
     #[test]
@@ -477,9 +475,10 @@ mod tests {
         // Move the sim far enough that the old rect and new rect don't merge.
         sim_store.anim.get_mut("a").unwrap().x = 600.0;
         let frame2 = tracker.step(&sim_store, &fx);
-        // frame2 should contain both the old (50,50-ish) and new (300,50-ish) positions.
-        let covers_old = frame2.iter().any(|r| r.contains(Point::new(50, 50)));
-        let covers_new = frame2.iter().any(|r| r.contains(Point::new(300, 50)));
+        // World coords land 1:1 in render space. frame2 should contain
+        // both the old (100,100) and the new (600,100) positions.
+        let covers_old = frame2.iter().any(|r| r.contains(Point::new(100, 100)));
+        let covers_new = frame2.iter().any(|r| r.contains(Point::new(600, 100)));
         assert!(covers_old);
         assert!(covers_new);
 
@@ -487,7 +486,7 @@ mod tests {
         // So if the sim doesn't move, frame3 contains exactly one rect around new.
         let frame3 = tracker.step(&sim_store, &fx);
         assert_eq!(frame3.len(), 1);
-        assert!(frame3[0].contains(Point::new(300, 50)));
-        assert!(!frame3[0].contains(Point::new(50, 50)));
+        assert!(frame3[0].contains(Point::new(600, 100)));
+        assert!(!frame3[0].contains(Point::new(100, 100)));
     }
 }

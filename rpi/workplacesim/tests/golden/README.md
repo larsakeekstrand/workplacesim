@@ -1,7 +1,7 @@
 Golden files for scene regression tests.
 
-`static-bg.raw` is 640 * 360 * 3 = 691200 bytes of tight-packed RGB. Load it
-into an image viewer as raw 640x360 RGB before committing any change.
+`static-bg.raw` is 1280 * 720 * 3 = 2764800 bytes of tight-packed RGB. Load it
+into an image viewer as raw 1280x720 RGB before committing any change.
 
 Regenerate:
 

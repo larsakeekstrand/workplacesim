@@ -42,13 +42,13 @@ pub use routing::{
     path_to_door_from, staging_for_target, target_approach_waypoints, Target,
 };
 
-/// Internal render resolution. The physical window (and /dev/fb0 in step 5)
-/// is `2 * RENDER_W x 2 * RENDER_H`; each pixel in the render frame becomes a
-/// 2x2 block on screen. This halves the 1280x640 JS world but keeps parity in
-/// layout since `WORLD_W = 2 * RENDER_W`; scene code draws into the half-size
-/// frame by halving incoming coordinates.
-pub const RENDER_W: u32 = 640;
-pub const RENDER_H: u32 = 360;
+/// Internal render resolution. Matches `WORLD_W` exactly on the x axis and
+/// gives the 1280x640 JS world 80 px of unused headroom on a 720-tall canvas
+/// (16:9), upscaled aspect-preserving by the fb/desktop backends. World
+/// coords land 1:1 in render space — `scene::h()` is identity. Bumped from
+/// 640x360 to genuinely sharpen the scene on 1080p+ panels.
+pub const RENDER_W: u32 = 1280;
+pub const RENDER_H: u32 = 720;
 
 /// Framebuffer primitives. `scene::*` only touches pixels through this trait,
 /// so the same draw code feeds both `RenderFrame` (CPU buffer) and any future
@@ -262,9 +262,10 @@ impl DrawTarget for RenderFrame {
     }
 }
 
-/// Nearest-neighbour 2x upscale. Writes a 1280x720 (or generally `2*src_w` x
-/// `2*src_h`) ARGB buffer packed as `(0xff << 24) | (r << 16) | (g << 8) | b`
-/// — the encoding minifb expects.
+/// Nearest-neighbour 2x upscale. Writes a `2*src_w` x `2*src_h` ARGB buffer
+/// packed as `(0xff << 24) | (r << 16) | (g << 8) | b` — the encoding minifb
+/// expects. Only used by tests now; the live desktop path goes through
+/// `compute_scale_fit` for non-integer scale support.
 pub fn nearest_neighbour_blit_2x(src: &RenderFrame, dst: &mut [u32]) {
     let sw = src.width as usize;
     let sh = src.height as usize;
