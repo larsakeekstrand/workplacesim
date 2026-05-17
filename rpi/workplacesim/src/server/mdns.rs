@@ -79,7 +79,7 @@ mod linux {
 
             let mut fullnames = Vec::with_capacity(2);
 
-            // Mirrors the old workplacesim.avahi-service XML verbatim.
+            // Same record shape the previous avahi-daemon deploy used.
             let ws = build_service(
                 WORKPLACESIM_SERVICE,
                 &instance,

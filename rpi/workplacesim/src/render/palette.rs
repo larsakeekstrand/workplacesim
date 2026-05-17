@@ -53,6 +53,14 @@ pub const WHITEBOARD_TEXT: Rgb = rgb_from_hex(0x1a1f28);
 pub const TICKER_TEXT: Rgb = rgb_from_hex(0xcfe6ff);
 pub const STATUS_TEXT: Rgb = rgb_from_hex(0xd8d2c5);
 pub const STATUS_PANEL_BG: Rgb = rgb_from_hex(0x1c1510);
+
+// Room-label tints. JS paints alpha-on-floor; we pre-blend the JS hex against
+// the average floor tone for each room so the framebuffer can write solid RGB
+// without a read-back. Values approximate the JS look at the stated alphas
+// (#ffffff60 / #9ac8ff90 / #66ff8890).
+pub const ROOM_LABEL_OPEN: Rgb = rgb_from_hex(0x877f78);
+pub const ROOM_LABEL_MEETING: Rgb = rgb_from_hex(0x839ecc);
+pub const ROOM_LABEL_LAB: Rgb = rgb_from_hex(0x5fc48f);
 pub const BENCH_FLASH_OK: Rgb = rgb_from_hex(0x6ef08e);
 pub const BENCH_FLASH_ERR: Rgb = rgb_from_hex(0xff6464);
 pub const GLYPH_ERR: Rgb = rgb_from_hex(0xff6464);

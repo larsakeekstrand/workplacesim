@@ -20,13 +20,18 @@ pub mod text;
 // on top makes them legible against bodies; tethers under bodies prevents the
 // dashed line from striping the parent's silhouette.
 
-use super::{palette, Framebuffer};
+use super::{palette, Framebuffer, RenderFrame};
 
-/// Paint the static world (floor, walls, windows, fixed furniture). The
-/// `window_spill_alpha` argument comes from `Config::window_spill_alpha`;
-/// golden-frame tests pass `crate::config::DEFAULT_WINDOW_SPILL_ALPHA` to
-/// keep the hardcoded default reproducible.
-pub fn draw_static_background(fb: &mut impl Framebuffer, window_spill_alpha: f32) {
+/// Paint the static world (floor, walls, windows, fixed furniture, room
+/// labels). The `window_spill_alpha` argument comes from
+/// `Config::window_spill_alpha`; golden-frame tests pass
+/// `crate::config::DEFAULT_WINDOW_SPILL_ALPHA` to keep the hardcoded default
+/// reproducible.
+///
+/// Takes `&mut RenderFrame` (not `&mut impl Framebuffer`) because room labels
+/// route through embedded-graphics' `DrawTarget`, which is only implemented
+/// on the concrete type.
+pub fn draw_static_background(fb: &mut RenderFrame, window_spill_alpha: f32) {
     fb.fill_rect(
         super::Rect::new(0, 0, fb.width() as i32, fb.height() as i32),
         palette::BG,
@@ -34,6 +39,11 @@ pub fn draw_static_background(fb: &mut impl Framebuffer, window_spill_alpha: f32
     rooms::draw_floor(fb);
     rooms::draw_windows(fb, window_spill_alpha);
     rooms::draw_walls(fb);
+    // Labels go between walls and room furniture so the meeting whiteboard
+    // and lab bench paint over the labels (mirrors JS display-list order,
+    // where `drawWalls` adds the label text before `drawMeetingRoom` /
+    // `drawLabRoom` add the panel graphics).
+    text::draw_room_labels(fb);
     furniture::draw_desks(fb);
     furniture::draw_meeting_room(fb);
     furniture::draw_lab_room(fb);

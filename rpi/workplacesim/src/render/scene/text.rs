@@ -9,7 +9,7 @@ use embedded_graphics::prelude::*;
 use embedded_graphics::text::Text;
 
 use super::super::fx_store::{FxLimits, FxStore};
-use super::super::geometry::{Rect, LAB_STATION_XS, MEETING_ROOM, OPEN_ROOM};
+use super::super::geometry::{Rect, LAB_ROOM, LAB_STATION_XS, MEETING_ROOM, OPEN_ROOM};
 use super::super::palette::{self, Rgb};
 use super::super::sim_store::{SimState, SimStore};
 use super::super::{blend, Framebuffer, RenderFrame};
@@ -17,6 +17,47 @@ use super::h;
 
 /// Max chars on the whiteboard at FONT_5X8 (~5px/char, ~96 px panel).
 const WB_MAX_CHARS: usize = 18;
+
+/// Static room-name labels — "OPEN PLAN", "MEETING ROOM", "TEST LAB". JS
+/// anchors each label at `(room.right - 10, room.top + 6)` with origin (1, 0).
+/// FONT_5X8 right-anchors by subtracting `5 * len` from x, and we offset y by
+/// (font height - 1) since embedded-graphics' default Baseline::Alphabetic
+/// places the y at the baseline; the JS top-aligned coord +7 lands on the
+/// same row as the 9-px Phaser glyph cap-height. Painted after furniture but
+/// before sims so a sim walking through the corner of a room reads on top.
+pub fn draw_room_labels(fb: &mut RenderFrame) {
+    paint_label(
+        fb,
+        h(OPEN_ROOM.x + OPEN_ROOM.w) - 10,
+        h(OPEN_ROOM.y) + 6,
+        "OPEN PLAN",
+        palette::ROOM_LABEL_OPEN,
+    );
+    paint_label(
+        fb,
+        h(MEETING_ROOM.x + MEETING_ROOM.w) - 10,
+        h(MEETING_ROOM.y) + 6,
+        "MEETING ROOM",
+        palette::ROOM_LABEL_MEETING,
+    );
+    paint_label(
+        fb,
+        h(LAB_ROOM.x + LAB_ROOM.w) - 10,
+        h(LAB_ROOM.y) + 6,
+        "TEST LAB",
+        palette::ROOM_LABEL_LAB,
+    );
+}
+
+fn paint_label(fb: &mut RenderFrame, right_x: i32, top_y: i32, text: &str, color: Rgb) {
+    // FONT_5X8 advance width is 5 px. Right-anchor by subtracting len * 5.
+    let x = right_x - (text.len() as i32) * 5;
+    // Phaser draws the 9-px glyph starting at top_y; FONT_5X8 baseline sits
+    // 7 px below the cap line (matches `draw_whiteboard`'s +7).
+    let y = top_y + 7;
+    let style = MonoTextStyle::new(&ascii::FONT_5X8, to_rgb888(color));
+    let _ = Text::new(text, Point::new(x, y), style).draw(fb);
+}
 
 /// Max chars per ticker line; open-plan interior width at FONT_5X8.
 const TICKER_MAX_CHARS: usize = 50;
@@ -405,5 +446,56 @@ mod tests {
     #[test]
     fn format_last_session_handles_none() {
         assert_eq!(format_last_session(None), "last --");
+    }
+
+    #[test]
+    fn draw_room_labels_does_not_panic_on_empty_world() {
+        let mut fb = RenderFrame::new(RENDER_W, RENDER_H);
+        fb.clear(palette::BG);
+        draw_room_labels(&mut fb);
+    }
+
+    #[test]
+    fn draw_room_labels_paints_inside_each_room() {
+        let mut fb = RenderFrame::new(RENDER_W, RENDER_H);
+        fb.clear(palette::BG);
+        // Floor draw first so we can detect that the label changes pixels in
+        // the room's top strip (vs the static-BG comparison, which would also
+        // catch any furniture draws above the label band).
+        crate::render::scene::rooms::draw_floor(&mut fb);
+        let before = fb.rgb_bytes().to_vec();
+        draw_room_labels(&mut fb);
+        let after = fb.rgb_bytes();
+        assert_ne!(before.as_slice(), after, "labels must paint pixels");
+
+        // At least one painted pixel must fall inside each room's top band.
+        for (room, _name) in [
+            (OPEN_ROOM, "OPEN PLAN"),
+            (MEETING_ROOM, "MEETING ROOM"),
+            (LAB_ROOM, "TEST LAB"),
+        ] {
+            let rx = h(room.x);
+            let rw = h(room.w);
+            let ry = h(room.y);
+            let band_h = 16;
+            let mut hit = false;
+            for y in ry..(ry + band_h).min(RENDER_H as i32) {
+                for x in rx..(rx + rw) {
+                    if fb.get_pixel(x, y) != fb_at(&before, x, y) {
+                        hit = true;
+                        break;
+                    }
+                }
+                if hit {
+                    break;
+                }
+            }
+            assert!(hit, "no label pixels in room {:?}", room);
+        }
+    }
+
+    fn fb_at(bytes: &[u8], x: i32, y: i32) -> palette::Rgb {
+        let i = ((y as usize) * RENDER_W as usize + x as usize) * 3;
+        palette::Rgb(bytes[i], bytes[i + 1], bytes[i + 2])
     }
 }

@@ -85,8 +85,9 @@ pub fn draw_meeting_room(fb: &mut impl Framebuffer) {
         palette::WHITEBOARD_FRAME,
     );
     fb.fill_rect(Rect::new(wb_x, wb_y, wb_w, wb_h), palette::WHITEBOARD_BODY);
-    // TODO(step 6): diagram strokes + session_prompt text overlay.
-    // Tray ledge beneath the whiteboard (JS draws marker-stripes; static panel here).
+    // Text overlay lives in `scene::text::draw_whiteboard`; diagram strokes
+    // are a future nice-to-have. Tray ledge beneath the whiteboard (JS draws
+    // marker-stripes; static panel here).
     fb.fill_rect(
         Rect::new(wb_x, wb_y + wb_h + 1, wb_w, 1),
         palette::WHITEBOARD_FRAME,

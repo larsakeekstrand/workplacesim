@@ -155,7 +155,7 @@ makes mid-session plan-mode toggles visible.
   independently.
 
 - **Glyph ladder** (highest priority first, in `simGlyph(sim)`):
-  `!` (error, 2 s) → `🧪` (visiting lab) → `💤` (idle) → `…` (walking) →
+  `!` (error, 2 s) → `🧪` (visiting lab) → `💤` (idle, seated) → `…` (walking) →
   `📋` (seated in plan) → `Z` (seated >60 s) → empty.
 
 - **Tool-mote palette** (`MOTE_COLORS`): Read/Grep/Glob blue `#7fc7ff`,
