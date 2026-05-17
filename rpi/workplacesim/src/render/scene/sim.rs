@@ -11,11 +11,10 @@ use super::super::sim_store::{SimAnim, SimState, SimStore};
 use super::super::Framebuffer;
 use super::h;
 
-/// JS `sprite.setScale(1.8)` against 14x28 parts. We render at 640x360 (half
-/// JS world), and in practice a scale of 1.8 at render resolution reads much
-/// better on a TV-sized display — each sim occupies ~11x22 render pixels,
-/// doubling on the fb after upscale to roughly 22x44 TV pixels.
-const SIM_SCALE: f32 = 1.8;
+/// JS `sprite.setScale(1.8)` against 14x28 parts. Internal render is now
+/// 1280x720 (full JS world); 3.6 keeps each sim at the same physical size
+/// it had against the prior 640x360 canvas — ~22x44 render pixels.
+const SIM_SCALE: f32 = 3.6;
 
 /// Paint every alive sim. Y-sorted so north bodies paint before south ones.
 pub fn draw_sims<F: Framebuffer>(fb: &mut F, store: &SimStore) {
@@ -174,29 +173,31 @@ fn draw_session_label<F: Framebuffer>(
     let Some(glyph) = label_glyph(ch) else {
         return;
     };
-    // Glyph envelope is 3x5; with the 1-px cardinal outline the painted
-    // footprint is 5x7. Center inside the 11x13 body so the outline never
-    // overruns it.
-    let glyph_w = 3;
-    let glyph_h = 5;
+    // Each glyph pixel renders as a PX*PX block so the label scales with the
+    // (now larger) body. Glyph envelope is 3x5 raw → 6x10 painted; outline is
+    // PX cardinal-offset, so the full footprint is 8x12. Centered inside the
+    // body so the outline never overruns it.
+    const PX: i32 = 2;
+    let glyph_w = 3 * PX;
+    let glyph_h = 5 * PX;
     let gx = cx - glyph_w / 2;
     let gy = body_y + (body_h - glyph_h) / 2;
     let outline = Rgb(0, 0, 0);
     let fill = Rgb(0xff, 0xff, 0xff);
-    // Outline pass: paint each fg cell at its four cardinal neighbours so
-    // every white pixel is bordered. Diagonals stay clear, which keeps the
-    // glyph crisp rather than blobby.
+    // Outline pass: paint each fg block at its four cardinal neighbours
+    // (offset by PX, not 1) so every fill block is bordered. Diagonals
+    // stay clear, which keeps the glyph crisp rather than blobby.
     for (row, line) in glyph.iter().enumerate() {
         for (col, c) in line.chars().enumerate() {
             if c != '#' {
                 continue;
             }
-            let px = gx + col as i32;
-            let py = gy + row as i32;
-            fb.set_pixel(px - 1, py, outline);
-            fb.set_pixel(px + 1, py, outline);
-            fb.set_pixel(px, py - 1, outline);
-            fb.set_pixel(px, py + 1, outline);
+            let px = gx + col as i32 * PX;
+            let py = gy + row as i32 * PX;
+            fb.fill_rect(Rect::new(px - PX, py, PX, PX), outline);
+            fb.fill_rect(Rect::new(px + PX, py, PX, PX), outline);
+            fb.fill_rect(Rect::new(px, py - PX, PX, PX), outline);
+            fb.fill_rect(Rect::new(px, py + PX, PX, PX), outline);
         }
     }
     for (row, line) in glyph.iter().enumerate() {
@@ -204,7 +205,10 @@ fn draw_session_label<F: Framebuffer>(
             if c != '#' {
                 continue;
             }
-            fb.set_pixel(gx + col as i32, gy + row as i32, fill);
+            fb.fill_rect(
+                Rect::new(gx + col as i32 * PX, gy + row as i32 * PX, PX, PX),
+                fill,
+            );
         }
     }
 }
