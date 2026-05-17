@@ -25,6 +25,10 @@ const WB_MAX_CHARS: usize = 18;
 /// places the y at the baseline; the JS top-aligned coord +7 lands on the
 /// same row as the 9-px Phaser glyph cap-height. Painted after furniture but
 /// before sims so a sim walking through the corner of a room reads on top.
+///
+/// MEETING ROOM is bottom-anchored instead of top — the whiteboard panel
+/// covers half the top edge on the smaller TVs we ship to, and the room's
+/// bottom interior is otherwise empty.
 pub fn draw_room_labels(fb: &mut RenderFrame) {
     paint_label(
         fb,
@@ -36,7 +40,7 @@ pub fn draw_room_labels(fb: &mut RenderFrame) {
     paint_label(
         fb,
         h(MEETING_ROOM.x + MEETING_ROOM.w) - 10,
-        h(MEETING_ROOM.y) + 6,
+        h(MEETING_ROOM.y + MEETING_ROOM.h) - 14,
         "MEETING ROOM",
         palette::ROOM_LABEL_MEETING,
     );
@@ -468,18 +472,24 @@ mod tests {
         let after = fb.rgb_bytes();
         assert_ne!(before.as_slice(), after, "labels must paint pixels");
 
-        // At least one painted pixel must fall inside each room's top band.
-        for (room, _name) in [
-            (OPEN_ROOM, "OPEN PLAN"),
-            (MEETING_ROOM, "MEETING ROOM"),
-            (LAB_ROOM, "TEST LAB"),
+        // At least one painted pixel must fall inside each room's label band.
+        // MEETING ROOM is bottom-anchored (whiteboard occludes the top edge);
+        // the other two are top-anchored.
+        let band_h = 16;
+        for (room, anchor_top, _name) in [
+            (OPEN_ROOM, true, "OPEN PLAN"),
+            (MEETING_ROOM, false, "MEETING ROOM"),
+            (LAB_ROOM, true, "TEST LAB"),
         ] {
             let rx = h(room.x);
             let rw = h(room.w);
-            let ry = h(room.y);
-            let band_h = 16;
+            let band_top = if anchor_top {
+                h(room.y)
+            } else {
+                (h(room.y + room.h) - band_h).max(0)
+            };
             let mut hit = false;
-            for y in ry..(ry + band_h).min(RENDER_H as i32) {
+            for y in band_top..(band_top + band_h).min(RENDER_H as i32) {
                 for x in rx..(rx + rw) {
                     if fb.get_pixel(x, y) != fb_at(&before, x, y) {
                         hit = true;
