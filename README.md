@@ -2,29 +2,32 @@
 
 > *The idea isn't original — variations on "AI agents as little characters in a office setting" turn up in various corners of the internet. This is my own take on it, wired specifically to Claude Code's hook system.*
 
-A top-down, game-style visualization of Claude Code subagent activity. A Node
-server ingests hook events over HTTP; the Phaser 3 browser frontend subscribes
-to a Server-Sent Events stream and renders little pixel-art sims walking into
-rooms, sitting at desks, running tests, toggling plan mode, and reacting to
-every tool call. Procedural pixel-art — no sprite assets.
+A top-down, game-style visualization of Claude Code subagent activity. The
+visualizer ingests hook events over HTTP and renders little pixel-art sims
+walking into rooms, sitting at desks, running tests, toggling plan mode,
+and reacting to every tool call. Procedural pixel-art — no sprite assets.
 
-## Prerequisites
+## Two ways to run the visualizer
 
-- Node.js 20+
-- `jq` and `curl` on any machine whose Claude Code sessions should report in
+The visualizer ships in two implementations. Both speak the same HTTP + SSE
+protocol, so the [Claude Code plugin](#install-the-claude-code-plugin) works
+against either — pick based on whether you want a dedicated screen or a
+debug window.
 
-## Run the server
+| | **Path A — Raspberry Pi** _(plugin default)_ | **Path B — Browser (Node)** |
+|---|---|---|
+| Stack | Rust → `/dev/fb0` over HDMI | Node + Phaser 3 in a browser |
+| Where it runs | A Pi 1+ on your LAN | Wherever you run `npm start` |
+| Setup time | ~10 min (rpi-imager + install.sh) | ~30 s (`npm install && npm start`) |
+| Best for | A monitor on your desk that lights up when Claude works | Developing the visualizer; demos when no Pi handy |
+| Plugin `WORKPLACESIM_URL` | unset (defaults to `http://workplacesim.local:4317`) | `http://127.0.0.1:4317` |
 
-```sh
-npm install
-npm start
-# open http://localhost:4317
-```
+Both paths render the same scene from the same protocol. A few ambient
+details are currently Node-only — window-light breathing modulated by
+event rate, and south-of-sim identity labels — so the browser view is the
+more complete reference; see [What you'll see](#what-youll-see).
 
-Env vars: `PORT` (default `4317`), `HOST` (default `127.0.0.1`; set to `0.0.0.0`
-to accept hook posts from other machines on the LAN).
-
-## Install as a Claude Code plugin
+## Install the Claude Code plugin
 
 The hook side ships as a Claude Code plugin. Install it straight from GitHub:
 
@@ -56,6 +59,10 @@ When working on the plugin itself, install from your local checkout instead:
 /plugin install workplacesim
 ```
 
+The plugin's hook script needs `jq` and `curl` on `$PATH`. If `jq` is
+missing the script exits 0 silently — your Claude session isn't blocked,
+you just won't see sims appear.
+
 **Restart Claude Code after installing.** The plugin registers eleven hook
 subscriptions across eight Claude Code events; `/reload-plugins` is not
 enough to activate new event subscriptions. After restart, `/workplacesim`
@@ -63,8 +70,7 @@ checks the visualizer's status.
 
 By default the plugin POSTs to `http://workplacesim.local:4317` — the Pi
 running the Rust visualizer, reachable via the in-binary mDNS responder.
-To point it elsewhere (e.g. a local Node server), set `WORKPLACESIM_URL`
-in the environment Claude Code runs in:
+For Path B (Node) or any other target, set `WORKPLACESIM_URL`:
 
 ```sh
 export WORKPLACESIM_URL=http://127.0.0.1:4317   # local Node server
@@ -72,7 +78,94 @@ export WORKPLACESIM_URL=http://127.0.0.1:4317   # local Node server
 
 See `plugin/README.md` for plugin-specific details.
 
+## Path A — Raspberry Pi
+
+The Rust port at `rpi/workplacesim/` renders the scene directly to
+`/dev/fb0` on a Raspberry Pi 1 (ARMv6) — no browser, no X, no Node. Plug
+the Pi into a TV via HDMI, deploy the binary as a systemd service, and the
+plugin reaches it via mDNS with no further config.
+
+### Setup
+
+Flash the SD card with **Raspberry Pi OS Lite** via `rpi-imager`
+(https://www.raspberrypi.com/software/). Its Advanced Options dialog
+preseeds hostname, authorized SSH key, wifi SSID/PSK, and locale. Then
+from this repo on macOS:
+
+```sh
+# needs: Docker running, cargo install cross
+cd rpi/workplacesim
+./deploy/install.sh pi@workplacesim.local
+```
+
+Once the deploy finishes the plugin's default `WORKPLACESIM_URL` already
+points at `workplacesim.local:4317`, so nothing further needs configuring —
+every Claude session reports in immediately.
+
+### How it talks to the plugin
+
+The Rust binary is a drop-in for the Node server: same HTTP+SSE protocol,
+same payloads, same `/events` and `/` routes (so a browser at
+`http://<pi>:4317/` still shows the Phaser frontend for debug). It also
+runs an in-process mDNS responder that announces `_workplacesim._tcp`, so
+the Pi is reachable at `<hostname>.local:4317` without `avahi-daemon`.
+
+### Desktop dev mode (macOS, no Pi required)
+
+Same Rust crate runs in a minifb window on your Mac for iteration without
+flashing to a Pi:
+
+```sh
+cd rpi/workplacesim
+cargo run --features desktop --no-default-features --bin workplacesim
+# or with seeded demo sims:
+cargo run --features desktop --no-default-features --bin workplacesim -- --demo 3
+```
+
+### Live tuning
+
+Open `http://<pi>:4317/config` on any device on the same LAN. Motion,
+effect density, lifecycle TTLs, and display settings are editable through
+the page and persist to disk.
+
+See `rpi/workplacesim/deploy/README.md` for the full rpi-imager walkthrough,
+the one-time Pi setup (passwordless sudo, `framebuffer_depth=32`, getty
+disable), deploy flags, troubleshooting, and uninstall.
+
+## Path B — Browser (Node + Phaser)
+
+The Node server + Phaser 3 frontend renders the scene in a browser. Quicker
+to spin up than the Pi path; the right choice for developing the visualizer
+itself or running a demo from a laptop without dedicated hardware.
+
+### Prerequisites
+
+- Node.js 20+
+
+### Run
+
+```sh
+npm install
+npm start
+# open http://localhost:4317
+```
+
+Env vars: `PORT` (default `4317`), `HOST` (default `127.0.0.1`; set to
+`0.0.0.0` to accept hook posts from other machines on the LAN).
+
+### Point the plugin at it
+
+The plugin defaults to the Pi address, so override it for Path B and put
+it in your shell rc:
+
+```sh
+export WORKPLACESIM_URL=http://127.0.0.1:4317
+```
+
 ## Hook simulator (no real Claude needed)
+
+Drives synthetic events at either visualizer — useful for iterating on the
+frontend without a live Claude session.
 
 ```sh
 npm run simulate
@@ -87,12 +180,14 @@ npm run simulate
 #   --no-main-session      skip the persistent session sim
 ```
 
-The simulator runs one persistent session sim plus a rolling set of subagents,
-all sharing a session_id so tether lines render correctly. Every feature
-surface is exercised: tool-call motes, file-touch ticker, lab monitor flashes,
-plan-mode whiteboard, idle glyph, turn-end wave, error halo, lab visits, and
-permission-mode reclassify. Ctrl+C to stop — a `SessionEnd`-equivalent clears
-the session sim cleanly.
+By default the simulator targets `http://127.0.0.1:4317`. Point it
+elsewhere with `WORKPLACESIM_URL=http://<host>:4317 npm run simulate` —
+e.g. against the Pi to exercise the Rust render path.
+
+The simulator runs one persistent session sim plus a rolling set of
+subagents, all sharing a session_id so tether lines render correctly.
+Every feature surface is exercised. Ctrl+C to stop — a
+`SessionEnd`-equivalent clears the session sim cleanly.
 
 ## What you'll see
 
@@ -116,8 +211,9 @@ the session sim cleanly.
 - **Footstep trails** fade behind every walking sim in the sim's shirt color.
 - **Parent→child tethers** — a brief dashed line from the main session sim to
   each new subagent it spawns.
-- **Window-light breathing** — the exterior windows brighten with recent event
-  rate; the office visibly inhales on activity bursts and settles on idle.
+- **Window-light breathing** _(Node only)_ — the exterior windows brighten
+  with recent event rate; the office visibly inhales on activity bursts
+  and settles on idle.
 - **Tool-call motes** — tiny pixel dots drift up from a sim's head on each
   tool call, color-coded by tool family (Read=blue, Write=amber, Bash=green,
   Agent=magenta, Web=purple).
@@ -146,52 +242,10 @@ ends, the sim returns to whatever its current classification says.
 Sims hug a corridor grid instead of cutting diagonals across desks — vertical
 halls at x=130 and x=776, horizontal corridors at y=125/256/416/576.
 
-## Running on a Raspberry Pi (no browser)
-
-A Rust port in `rpi/workplacesim/` renders the scene directly to
-`/dev/fb0` on a Raspberry Pi 1 (ARMv6) — no browser, no X, no Node.
-Plug the Pi into a TV via HDMI, deploy the binary as a systemd
-service, and point Claude Code's hooks at it over the LAN.
-
-Flash the SD card with **Raspberry Pi OS Lite** via `rpi-imager`
-(https://www.raspberrypi.com/software/) — its Advanced Options dialog
-preseeds hostname, authorized SSH key, wifi SSID/PSK, and locale. Then
-from this repo on macOS:
-
-```sh
-# needs: Docker running, cargo install cross
-cd rpi/workplacesim
-./deploy/install.sh pi@workplacesim.local
-# On the Mac where Claude Code runs:
-export WORKPLACESIM_URL=http://workplacesim.local:4317
-```
-
-The Rust binary is a drop-in for the Node server: same HTTP+SSE
-protocol, same payloads, same `/events` and `/` routes (so a browser
-at `http://<pi>:4317/` still shows the Phaser frontend for debug). It
-also runs an in-process mDNS responder that announces
-`_workplacesim._tcp`, so the Pi is reachable at `<hostname>.local:4317`
-without `avahi-daemon` on the Pi.
-
-Dev on macOS runs windowed via:
-
-```sh
-cd rpi/workplacesim
-cargo run --features desktop --no-default-features --bin workplacesim
-# or with seeded demo sims:
-cargo run --features desktop --no-default-features --bin workplacesim -- --demo 3
-```
-
-Live tuning: open `http://<pi>:4317/config` on any device on the same
-LAN. Motion, effect density, lifecycle TTLs, and display settings are
-editable through the page and persist to disk.
-
-See `rpi/workplacesim/deploy/README.md` for the full rpi-imager
-walkthrough, the one-time Pi setup (passwordless sudo,
-`framebuffer_depth=32`, getty disable), deploy flags, troubleshooting,
-and uninstall.
-
 ## Smoke test (single agent, no plugin)
+
+Works against either visualizer. Substitute `workplacesim.local` for
+`localhost` to hit the Pi.
 
 ```sh
 curl -XPOST http://localhost:4317/hooks/subagent-start -H content-type:application/json -d '{
@@ -220,6 +274,10 @@ session/agent):
 | `/api/agents` (GET) | — | JSON dump of currently active agents. |
 | `/events` (GET) | — | SSE stream of all broadcasts. |
 
+The Rust port (Path A) adds `/config`, `/api/config`, `/api/config/bounds`,
+`/api/config/reset`, `/api/restart`, and `/api/status` for the live-tuning
+page; the Node server (Path B) doesn't expose these.
+
 ## SSE event types
 
 `snapshot`, `start`, `stop`, `tool`, `visit`, `reclassify`, `prompt`, `idle`,
@@ -228,7 +286,7 @@ JSON keyed by `type` plus `agent_id` and a handful of event-specific fields.
 
 ## Notes / limitations
 
-- State is in-memory; restarting the server clears active sims.
+- State is in-memory; restarting either server clears active sims.
 - Real Claude Code's `SubagentStop` gives a different `agent_id` than
   dispatch. The backend falls back to FIFO matching by
   `(session_id, agent_type)`; for parallel subagents of the same type this is
