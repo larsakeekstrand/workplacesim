@@ -20,17 +20,19 @@ const SIM_PADDING: i32 = 4;
 const FX_PADDING: i32 = 3;
 
 /// Rect dimensions that bound a sim sprite (body + head + hair + shadow),
-/// plus padding. Mirrors `scene::sim::draw_sim` geometry. Expressed as half-
-/// widths / half-heights around the sim anchor.
-const SIM_HALF_W: i32 = 6;
-const SIM_UP: i32 = 10;
-const SIM_DOWN: i32 = 8;
+/// plus padding. Mirrors `scene::sim::draw_sim` geometry at `SIM_SCALE=3.6`
+/// on the 1280×720 canvas. Expressed as half-widths / half-heights around
+/// the sim anchor.
+const SIM_HALF_W: i32 = 15;
+const SIM_UP: i32 = 28;
+const SIM_DOWN: i32 = 27;
 
 /// Radius (render px) bounding a halo at maximum expansion (3 + 8 * t, t=1).
 const HALO_MAX_R: i32 = 12;
 
-/// Motes drift up by 24 world px over their lifetime → 12 render px.
-const MOTE_UP: i32 = 12;
+/// Motes drift up by 24 render px over their lifetime (matches `scene::effects`
+/// `lift = 24 * t`).
+const MOTE_UP: i32 = 24;
 
 /// Keeps the previous-frame dirties so the new frame can erase them back to
 /// background before redrawing dynamics.
