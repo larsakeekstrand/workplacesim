@@ -156,6 +156,55 @@ if systemctl list-unit-files avahi-daemon.service >/dev/null 2>&1 \
     sudo systemctl disable --now avahi-daemon.socket || true
 fi
 
+# Boot-time trimming for a single-purpose kiosk Pi. Idempotent — safe to
+# re-run on every install. The Pi 1 boot is dominated by SD I/O + service
+# enumeration, so disabling unused units shaves a few seconds visible.
+BOOT_OPT_CHANGED=0
+for unit in apt-daily.timer apt-daily-upgrade.timer man-db.timer; do
+    if systemctl list-unit-files "${unit}" >/dev/null 2>&1; then
+        sudo systemctl mask "${unit}" >/dev/null 2>&1 || true
+    fi
+done
+# triggerhappy = input event daemon, useless headless. keyboard/console-setup
+# = layout for a keyboard we don't have. bluetooth/hciuart = BT stack the
+# Pi 1 doesn't even ship; Pi 3+ enables it by default.
+for svc in triggerhappy.service keyboard-setup.service console-setup.service \
+           bluetooth.service hciuart.service; do
+    if systemctl list-unit-files "${svc}" >/dev/null 2>&1; then
+        sudo systemctl disable --now "${svc}" >/dev/null 2>&1 || true
+    fi
+done
+
+# /boot/firmware/config.txt — quiet the rainbow splash + skip the kernel
+# boot-delay countdown + disable BT firmware init. Append-if-missing.
+config_txt="/boot/firmware/config.txt"
+if [[ -f "${config_txt}" ]]; then
+    for line in 'disable_splash=1' 'boot_delay=0' 'dtoverlay=disable-bt'; do
+        if ! grep -qxF "${line}" "${config_txt}"; then
+            echo "${line}" | sudo tee -a "${config_txt}" >/dev/null
+            BOOT_OPT_CHANGED=1
+        fi
+    done
+fi
+
+# /boot/firmware/cmdline.txt — suppress kernel boot chatter. Single-line file;
+# append flags space-separated, only if not already present.
+cmdline_txt="/boot/firmware/cmdline.txt"
+if [[ -f "${cmdline_txt}" ]]; then
+    cmdline="$(cat "${cmdline_txt}")"
+    new_cmdline="${cmdline}"
+    [[ "${cmdline}" == *"quiet"* ]] || new_cmdline="${new_cmdline} quiet"
+    [[ "${cmdline}" == *"loglevel="* ]] || new_cmdline="${new_cmdline} loglevel=3"
+    if [[ "${new_cmdline}" != "${cmdline}" ]]; then
+        printf '%s\n' "${new_cmdline}" | sudo tee "${cmdline_txt}" >/dev/null
+        BOOT_OPT_CHANGED=1
+    fi
+fi
+
+if [[ "${BOOT_OPT_CHANGED}" -eq 1 ]]; then
+    printf 'note: /boot/firmware/{config,cmdline}.txt changed — reboot for boot-time effect\n'
+fi
+
 sudo systemctl daemon-reload
 sudo systemctl enable --now workplacesim.service
 sleep 1

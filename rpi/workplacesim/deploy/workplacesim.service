@@ -1,8 +1,10 @@
 [Unit]
 Description=workplacesim office display
 Documentation=https://github.com/laek/workplacesim
-After=network-online.target
-Wants=network-online.target
+# Intentionally NOT After=network-online.target — bind(0.0.0.0:4317) doesn't
+# need an IP, and waiting for wpa_supplicant + DHCP adds ~20-30s of black
+# screen on Pi 1 wifi. Hook POSTs over LAN just start working a beat later
+# once wifi associates.
 # Steal tty1 from the login prompt so our process owns the framebuffer and
 # console; getty would otherwise redraw over our scene and grab VT ioctls.
 Conflicts=getty@tty1.service

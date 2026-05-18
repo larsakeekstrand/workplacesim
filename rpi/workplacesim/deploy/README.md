@@ -111,6 +111,27 @@ disables `getty@tty1` (so it doesn't fight the renderer for the console)
 and disables `avahi-daemon` if it finds it active (in-binary mDNS would
 collide with it).
 
+### Boot-time trimming (idempotent)
+
+The same SSH block applies a set of one-time tweaks that shave several
+seconds off cold boot on a single-purpose kiosk Pi:
+
+- Masks `apt-daily.timer`, `apt-daily-upgrade.timer`, `man-db.timer`.
+- Disables `triggerhappy`, `keyboard-setup`, `console-setup`,
+  `bluetooth`, `hciuart` — input/keyboard/BT machinery the visualizer
+  doesn't use.
+- Appends `disable_splash=1`, `boot_delay=0`, `dtoverlay=disable-bt` to
+  `/boot/firmware/config.txt` (skipping splash, the kernel boot countdown,
+  and BT firmware init).
+- Adds `quiet loglevel=3` to `/boot/firmware/cmdline.txt` to suppress
+  kernel boot chatter on the console workplacesim takes over.
+
+`config.txt` / `cmdline.txt` edits need a reboot to take effect; the
+script prints a note when it modifies them. The systemd unit no longer
+declares `Wants=network-online.target` — `bind(0.0.0.0:4317)` doesn't
+need an IP, and waiting for wpa_supplicant + DHCP was ~20-30s of black
+screen on Pi 1 wifi.
+
 ### Install flags
 
 - `--user <user>` — SSH login user (default `pi`). Use this if your
