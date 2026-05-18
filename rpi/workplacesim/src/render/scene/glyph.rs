@@ -95,9 +95,11 @@ pub fn draw_glyphs<F: Framebuffer>(
             continue;
         };
         let (art, color) = sprite(kind);
-        // Anchor: 4 px above the sim's head (head sits ~6 render-px above body).
+        // Anchor: above the sim's head. Offset is tuned for the 1280x720
+        // canvas + SIM_SCALE=3.6 geometry — head extends ~16 render-px above
+        // the sim anchor, plus the hair on top.
         let cx = h(sim.x as i32);
-        let top = h(sim.y as i32) - 12;
+        let top = h(sim.y as i32) - 24;
         let w = art[0].len() as i32;
         draw_sprite(fb, art, cx - w / 2, top, color);
     }
