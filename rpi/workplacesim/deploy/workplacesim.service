@@ -1,10 +1,15 @@
 [Unit]
 Description=workplacesim office display
 Documentation=https://github.com/laek/workplacesim
-# Intentionally NOT After=network-online.target — bind(0.0.0.0:4317) doesn't
-# need an IP, and waiting for wpa_supplicant + DHCP adds ~20-30s of black
-# screen on Pi 1 wifi. Hook POSTs over LAN just start working a beat later
-# once wifi associates.
+# Wait for an IP before starting. We tried dropping this to save ~20-30s of
+# Pi 1 wifi-association on cold boot, but the in-binary mdns-sd responder
+# doesn't re-publish the host A-record when interfaces come up after the
+# service has started — so `workplacesim.local` stops resolving for hook
+# POSTs. The boot-time speedup needs a different approach (either fix the
+# responder to react to interface-up events, or restart workplacesim once
+# wifi associates).
+After=network-online.target
+Wants=network-online.target
 # Steal tty1 from the login prompt so our process owns the framebuffer and
 # console; getty would otherwise redraw over our scene and grab VT ioctls.
 Conflicts=getty@tty1.service
